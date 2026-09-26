@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#080a0f" />
+    <meta
+      name="description"
+      content="The Last Descent is a fast, endless pixel-art dungeon crawler. Fight, cast, block, defeat the guardian, and descend."
+    />
+    <meta property="og:title" content="The Last Descent" />
+    <meta
+      property="og:description"
+      content="Steel. Spell. Descend. How deep can you go?"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://the-last-descent.tq22437.chatgpt.site" />
+    <meta property="og:image" content="https://the-last-descent.tq22437.chatgpt.site/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="The Last Descent" />
+    <meta name="twitter:description" content="Steel. Spell. Descend. How deep can you go?" />
+    <meta name="twitter:image" content="https://the-last-descent.tq22437.chatgpt.site/og.png" />
+    <link rel="canonical" href="https://the-last-descent.tq22437.chatgpt.site" />
+    <title>The Last Descent</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main id="app">
+      <section id="menuScreen" class="screen menu-screen" aria-labelledby="gameTitle">
+        <div class="menu-art" aria-hidden="true">
+          <div class="moon"></div>
+          <div class="tower tower-left"></div>
+          <div class="tower tower-right"></div>
+          <div class="gate-glow"></div>
+          <div class="gate"></div>
+          <div id="menuParticles" class="menu-particles"></div>
+        </div>
+
+        <div class="menu-vignette" aria-hidden="true"></div>
+        <div class="menu-content">
+          <p class="eyebrow"><span></span> An endless dungeon crawler <span></span></p>
+          <h1 id="gameTitle">
+            <span class="title-small">THE LAST</span>
+            <span class="title-large">DESCENT</span>
+          </h1>
+          <p class="menu-tagline">Steel. Spell. Descend.</p>
+
+          <div class="menu-actions">
+            <button id="playButton" class="pixel-button primary-button" type="button">
+              <span class="button-rune" aria-hidden="true">◆</span>
+              <span>Begin descent</span>
+              <span class="button-key desktop-hint">Enter</span>
+            </button>
+            <button id="settingsButton" class="pixel-button secondary-button" type="button">
+              <span class="button-icon" aria-hidden="true">⚙</span>
+              <span>Settings</span>
+            </button>
+          </div>
+
+          <p class="menu-note">No ads. No accounts. Just one more floor.</p>
+        </div>
+        <div class="menu-footer" aria-hidden="true">
+          <span>v1.0</span>
+          <span class="footer-rune">✦</span>
+          <span>THE DEPTHS AWAIT</span>
+        </div>
+      </section>
+
+      <section id="gameScreen" class="screen game-screen is-hidden" aria-label="The Last Descent game">
+        <div class="game-shell">
+          <canvas id="gameCanvas" width="960" height="540" aria-label="Top-down dungeon game area"></canvas>
+
+          <div id="hud" class="hud">
+            <div class="hud-top-left">
+              <div class="portrait" aria-hidden="true"><span>✦</span></div>
+              <div class="vitals">
+                <div class="bar-row">
+                  <div class="bar health-bar"><div id="healthFill" class="bar-fill"></div></div>
+                  <span id="healthText" class="bar-text">100 / 100</span>
+                </div>
+                <div class="bar-row mana-row">
+                  <div class="bar mana-bar"><div id="manaFill" class="bar-fill"></div></div>
+                  <span id="manaText" class="bar-text">100 / 100</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="floor-banner">
+              <span id="areaLabel" class="area-label">THE SUNLIT VERGE</span>
+              <span id="floorLabel" class="floor-label">TUTORIAL</span>
+            </div>
+
+            <div class="hud-top-right">
+              <div class="enemy-counter"><span class="skull-icon">☠</span><span id="enemyCount">0</span></div>
+              <button id="pauseButton" class="icon-button" type="button" aria-label="Pause and settings">⚙</button>
+            </div>
+
+            <div id="objectiveCard" class="objective-card">
+              <span class="objective-kicker">CURRENT TASK</span>
+              <strong id="objectiveText">Learn the basics</strong>
+            </div>
+
+            <div id="bossHud" class="boss-hud is-hidden">
+              <span id="bossName">FLOOR GUARDIAN</span>
+              <div class="boss-bar"><div id="bossFill"></div></div>
+            </div>
+
+            <div id="spellBar" class="spell-bar" aria-label="Equipped spells">
+              <button class="spell-slot selected" data-spell="ember" type="button">
+                <span class="spell-key">1</span><span class="spell-icon ember-icon">●</span><span class="spell-name">Ember</span><span class="cooldown-mask"></span>
+              </button>
+              <button class="spell-slot" data-spell="frost" type="button">
+                <span class="spell-key">2</span><span class="spell-icon frost-icon">✦</span><span class="spell-name">Frost</span><span class="cooldown-mask"></span>
+              </button>
+              <button class="spell-slot" data-spell="nova" type="button">
+                <span class="spell-key">3</span><span class="spell-icon nova-icon">✺</span><span class="spell-name">Nova</span><span class="cooldown-mask"></span>
+              </button>
+              <div class="action-hint desktop-hint"><kbd>Space</kbd><span>Strike</span></div>
+              <div class="action-hint desktop-hint"><kbd>Shift</kbd><span>Block</span></div>
+            </div>
+
+            <div id="toast" class="toast is-hidden" role="status"></div>
+          </div>
+
+          <div id="mobileControls" class="mobile-controls is-hidden" aria-label="Mobile game controls">
+            <div id="joystickZone" class="joystick-zone">
+              <div class="joystick-base"><div id="joystickKnob" class="joystick-knob"></div></div>
+            </div>
+            <div class="mobile-actions">
+              <button id="mobileSpell" class="touch-button spell-touch" type="button"><span>✦</span><small>Spell</small></button>
+              <button id="mobileBlock" class="touch-button block-touch" type="button"><span>◇</span><small>Guard</small></button>
+              <button id="mobileAttack" class="touch-button attack-touch" type="button"><span>⚔</span><small>Strike</small></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div id="tutorialModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle">
+        <div class="modal tutorial-modal">
+          <button class="modal-close" data-close="tutorial" type="button" aria-label="Skip tutorial">×</button>
+          <p class="modal-kicker">FIELD GUIDE · <span id="tutorialStepLabel">1 / 4</span></p>
+          <div id="tutorialVisual" class="tutorial-visual" aria-hidden="true"></div>
+          <h2 id="tutorialTitle">Move freely</h2>
+          <p id="tutorialDescription">Use WASD or the arrow keys to explore. You can move in any direction.</p>
+          <div id="tutorialDots" class="tutorial-dots" aria-hidden="true"></div>
+          <div class="modal-actions split-actions">
+            <button id="tutorialBack" class="text-button" type="button">Back</button>
+            <button id="tutorialNext" class="pixel-button primary-button compact" type="button">Next</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="settingsModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <div class="modal settings-modal">
+          <button class="modal-close" data-close="settings" type="button" aria-label="Close settings">×</button>
+          <p class="modal-kicker">OPTIONS</p>
+          <h2 id="settingsTitle">Settings</h2>
+
+          <div class="setting-group">
+            <div class="setting-heading">
+              <div><strong>Control style</strong><small>Choose what feels natural.</small></div>
+            </div>
+            <div class="segmented-control" role="radiogroup" aria-label="Control style">
+              <button class="control-option active" data-mode="desktop" role="radio" aria-checked="true" type="button"><span>⌨</span> Desktop</button>
+              <button class="control-option" data-mode="mobile" role="radio" aria-checked="false" type="button"><span>◎</span> Mobile</button>
+            </div>
+          </div>
+
+          <div class="settings-divider"></div>
+
+          <div class="controls-reference">
+            <div class="setting-heading"><div><strong>Controls</strong><small id="controlsSubtitle">Keyboard & mouse</small></div></div>
+            <div id="controlsGrid" class="controls-grid"></div>
+          </div>
+
+          <div class="setting-row">
+            <div><strong>Screen shake</strong><small>Impact feedback during combat.</small></div>
+            <button id="shakeToggle" class="toggle active" type="button" role="switch" aria-checked="true"><span></span></button>
+          </div>
+
+          <div class="modal-actions settings-actions">
+            <button id="replayTutorial" class="text-button" type="button">Replay tutorial</button>
+            <button id="settingsDone" class="pixel-button primary-button compact" type="button">Done</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="pauseModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
+        <div class="modal pause-modal">
+          <p class="modal-kicker">THE DESCENT WAITS</p>
+          <h2 id="pauseTitle">Paused</h2>
+          <div class="modal-actions stacked-actions">
+            <button id="resumeButton" class="pixel-button primary-button" type="button">Resume</button>
+            <button id="pauseSettingsButton" class="pixel-button secondary-button" type="button">Settings</button>
+            <button id="quitButton" class="text-button danger-text" type="button">End run</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="gameOverModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="gameOverTitle">
+        <div class="modal game-over-modal">
+          <p class="modal-kicker">YOUR LIGHT FADES</p>
+          <h2 id="gameOverTitle">The run is over</h2>
+          <p class="run-stat">You reached <strong id="reachedFloor">Floor 1</strong></p>
+          <div class="stats-row">
+            <div><span id="killStat">0</span><small>foes felled</small></div>
+            <div><span id="timeStat">0:00</span><small>time below</small></div>
+          </div>
+          <div class="modal-actions stacked-actions">
+            <button id="retryButton" class="pixel-button primary-button" type="button">Descend again</button>
+            <button id="menuButton" class="text-button" type="button">Return to title</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="floorTransition" class="floor-transition is-hidden" aria-live="polite">
+        <span id="transitionKicker">DESCENDING TO</span>
+        <strong id="transitionFloor">FLOOR 1</strong>
+        <small id="transitionName">THE HOLLOW HALLS</small>
+      </div>
+    </main>
+
+    <script src="game.js"></script>
+  </body>
+</html>
