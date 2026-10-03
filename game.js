@@ -51,7 +51,7 @@
   const BUFF_CATALOG = [
     { id: "nova_range", icon: "✺", name: "Expanding Star", description: "Nova radius grows by 25%." },
     { id: "burn_double", icon: "●", name: "Hungry Flame", description: "Ember burn damage is doubled." },
-    { id: "freeze_double", icon: "✦", name: "Deep Winter", description: "Frost freeze duration is doubled." },
+    { id: "frost_range", icon: "✦", name: "Shatterfield", description: "Frost impact radius grows by 30%." },
     { id: "physical", icon: "⚔", name: "Heavy Edge", description: "Physical strike damage increases by 50%." },
     { id: "perfect_wave", icon: "◇", name: "Answering Guard", description: "Perfect blocks blast nearby foes for 50% of current health." },
     { id: "health20", icon: "+", name: "Second Wind", description: "Heal 20 health immediately." },
@@ -64,8 +64,8 @@
   const tutorials = {
     desktop: [
       { title: "Move freely", description: "Use WASD or the arrow keys to explore the tiled arena. Move in any direction and keep your distance.", visual: '<div class="tutorial-keys"><span>W</span><span>A</span><span>S</span><span>D</span></div>' },
-      { title: "Strike, guard & dash", description: "Press Space to swing, hold F to guard, and tap Left Shift to dash. A perfectly timed block stops all damage.", visual: '<div class="tutorial-icon">⚔ <span style="color:#9fa9b6">◇</span> »</div>' },
-      { title: "Wield magic", description: "Press 1, 2, or 3 to equip and cast Ember, Frost, or Nova. Spells use mana, which restores on its own.", visual: '<div class="tutorial-icon"><span style="color:#f1743e">●</span> <span style="color:#66cce4">✦</span> <span style="color:#be84f0">✺</span></div>' },
+      { title: "Strike, guard & dash", description: "Press Space to slash, hold E to guard, and tap Left Shift to dash. A perfectly timed block stops all damage.", visual: '<div class="tutorial-icon">⚔ <span style="color:#9fa9b6">◇</span> »</div>' },
+      { title: "Wield magic", description: "Aim with the mouse, then right-click to cast your selected spell. Keys 1, 2, and 3 select and cast Ember, Frost, or Nova.", visual: '<div class="tutorial-icon"><span style="color:#f1743e">●</span> <span style="color:#66cce4">✦</span> <span style="color:#be84f0">✺</span></div>' },
       { title: "Defeat. Descend.", description: "Clear the floor to summon its guardian. Defeat the boss, then step onto the glowing stairs. The dungeon never ends.", visual: '<div class="tutorial-icon">☠ ↓</div>' }
     ],
     mobile: [
@@ -88,7 +88,7 @@
     bestFloor: Math.max(0, Number(loadPreference("bestFloor", 0)) || 0), runSeed: 0, buffs: {}, latestBuff: ""
   };
 
-  const input = { keys: new Set(), joystickX: 0, joystickY: 0, joystickPointer: null, mobileBlocking: false, mouseBlocking: false };
+  const input = { keys: new Set(), joystickX: 0, joystickY: 0, joystickPointer: null, mobileBlocking: false, mouseX: 0, mouseY: 0, hasMouseAim: false };
   const world = {
     width: 960, height: 540, theme: "grass", name: "THE SUNLIT VERGE", obstacles: [], torches: [], enemies: [],
     projectiles: [], particles: [], floaters: [], pickups: [], hazards: [], boss: null, bossSpawned: false,
@@ -164,6 +164,7 @@
     const points = [player, world.boss, world.stairs, ...world.enemies, ...world.projectiles, ...world.particles, ...world.floaters, ...world.pickups, ...world.torches, ...world.hazards].filter(Boolean);
     points.forEach((item) => { item.x *= scaleX; item.y *= scaleY; });
     world.obstacles.forEach((obstacle) => { obstacle.x *= scaleX; obstacle.y *= scaleY; obstacle.w *= scaleX; obstacle.h *= scaleY; });
+    if (input.hasMouseAim) { input.mouseX *= scaleX; input.mouseY *= scaleY; }
     [...world.enemies, ...(world.boss ? [world.boss] : [])].forEach((enemy) => {
       enemy.radius *= sizeScale;
       enemy.speed *= sizeScale;
@@ -557,7 +558,7 @@
   }
 
   function renderControlsReference() {
-    const desktop = [["Move", "WASD / Arrows"], ["Strike", "Space / Click"], ["Guard", "F / Right click"], ["Dash", "Left Shift"], ["Cast spells", "1 / 2 / 3"], ["Pause", "Escape"]];
+    const desktop = [["Move", "WASD / Arrows"], ["Strike", "Space / Left click"], ["Guard", "Hold E"], ["Cast selected spell", "Right click"], ["Select & cast", "1 / 2 / 3"], ["Dash", "Left Shift"], ["Pause", "Escape"]];
     const mobile = [["Move", "Joystick"], ["Strike", "Strike button"], ["Guard", "Hold Guard"], ["Dash", "Dash button"], ["Choose spell", "Spell slots"], ["Cast again", "Spell button"]];
     const controls = state.controlMode === "desktop" ? desktop : mobile;
     ui.controlsSubtitle.textContent = state.controlMode === "desktop" ? "Keyboard & mouse" : "Touch controls";
@@ -595,7 +596,7 @@
 
   function clearInput() {
     input.keys.clear();
-    Object.assign(input, { joystickX: 0, joystickY: 0, joystickPointer: null, mobileBlocking: false, mouseBlocking: false });
+    Object.assign(input, { joystickX: 0, joystickY: 0, joystickPointer: null, mobileBlocking: false });
     player.blocking = false;
     ui.joystickKnob.style.transform = "translate(-50%, -50%)";
     $$(".touch-button").forEach((button) => button.classList.remove("is-pressed"));
@@ -610,6 +611,16 @@
     if (input.keys.has("KeyS") || input.keys.has("ArrowDown")) y += 1;
     const length = Math.hypot(x, y);
     return length > 1 ? { x: x / length, y: y / length } : { x, y };
+  }
+
+  function aimVector() {
+    if (state.controlMode === "desktop" && input.hasMouseAim) {
+      const dx = input.mouseX - player.x;
+      const dy = input.mouseY - player.y;
+      const length = Math.hypot(dx, dy);
+      if (length > 4) return { x: dx / length, y: dy / length };
+    }
+    return { x: player.facingX, y: player.facingY };
   }
 
   function update(dt) {
@@ -648,7 +659,7 @@
       player.poisonTick -= dt;
       if (player.poisonTick <= 0) { player.poisonTick = 0.72; damagePlayer(4 + Math.floor(state.floor * 0.2), null, true); }
     }
-    const wantsBlock = (input.keys.has("KeyF") || input.mobileBlocking || input.mouseBlocking) && player.guardBroken <= 0;
+    const wantsBlock = (input.keys.has("KeyE") || input.mobileBlocking) && player.guardBroken <= 0;
     player.blocking = wantsBlock && player.stamina > 0;
     if (player.blocking && !player.wasBlocking) player.blockStartedAt = performance.now();
     if (player.blocking) {
@@ -853,8 +864,8 @@
     if (projectile.detonated) return;
     projectile.detonated = true;
     projectile.life = 0;
-    const radius = 66 * state.unit;
-    const freezeDuration = 3 * Math.pow(2, buffStacks("freeze_double"));
+    const radius = 66 * state.unit * Math.pow(1.3, buffStacks("frost_range"));
+    const freezeDuration = 3;
     [...world.enemies, ...(world.boss && !world.boss.dead ? [world.boss] : [])].forEach((enemy) => {
       if (!enemy.dead && distance(projectile, enemy) <= radius + enemy.radius) {
         damageEnemy(enemy, projectile.damage, projectile.vx * 0.2, projectile.vy * 0.2, "frost");
@@ -917,18 +928,21 @@
     player.attackCooldown = 0.38;
     player.attackAnim = 0.2;
     const unit = state.unit;
+    const aim = aimVector();
+    player.facingX = aim.x;
+    player.facingY = aim.y;
+    if (Math.abs(aim.x) > 0.12) player.lookDirection = Math.sign(aim.x);
     const size = Math.pow(2, buffStacks("long_blade"));
     const reach = 70 * unit * size;
-    const width = 18 * unit * size;
-    const startX = player.x + player.facingX * 10 * unit;
-    const startY = player.y + player.facingY * 10 * unit;
-    const endX = player.x + player.facingX * reach;
-    const endY = player.y + player.facingY * reach;
     [...world.enemies, ...(world.boss && !world.boss.dead ? [world.boss] : [])].forEach((enemy) => {
       if (enemy.dead) return;
-      if (pointToSegmentDistance(enemy.x, enemy.y, startX, startY, endX, endY) <= width + enemy.radius) damageEnemy(enemy, Math.round(24 * player.power * Math.pow(1.5, buffStacks("physical"))), player.facingX * 155 * unit, player.facingY * 155 * unit, "melee");
+      const dx = enemy.x - player.x;
+      const dy = enemy.y - player.y;
+      const dist = Math.max(0.001, Math.hypot(dx, dy));
+      const facingDot = (dx / dist) * aim.x + (dy / dist) * aim.y;
+      if (dist <= reach + enemy.radius && facingDot >= 0.28) damageEnemy(enemy, Math.round(24 * player.power * Math.pow(1.5, buffStacks("physical"))), aim.x * 155 * unit, aim.y * 155 * unit, "melee");
     });
-    burst(player.x + player.facingX * 32 * unit, player.y + player.facingY * 32 * unit, "#f2dca4", 4, 62 * unit);
+    burst(player.x + aim.x * 36 * unit, player.y + aim.y * 36 * unit, "#f2dca4", 4, 62 * unit);
   }
 
   function castSpell(index = state.selectedSpell) {
@@ -941,11 +955,15 @@
     player.mana -= spell.cost;
     player.spellCooldowns[index] = spellCooldown(index);
     const unit = state.unit;
+    const aim = aimVector();
+    player.facingX = aim.x;
+    player.facingY = aim.y;
+    if (Math.abs(aim.x) > 0.12) player.lookDirection = Math.sign(aim.x);
     if (spell.id === "ember") {
-      spawnProjectile(player.x + player.facingX * 18 * unit, player.y + player.facingY * 18 * unit, player.facingX, player.facingY, { friendly: true, damage: Math.round(34 * player.power), speed: 345 * unit, radius: 7 * unit, color: spell.color, life: 2.2, type: "ember", pierce: 0 });
+      spawnProjectile(player.x + aim.x * 18 * unit, player.y + aim.y * 18 * unit, aim.x, aim.y, { friendly: true, damage: Math.round(34 * player.power), speed: 345 * unit, radius: 7 * unit, color: spell.color, life: 2.2, type: "ember", pierce: 0 });
       burst(player.x, player.y, spell.color, 8, 75 * unit);
     } else if (spell.id === "frost") {
-      spawnProjectile(player.x + player.facingX * 18 * unit, player.y + player.facingY * 18 * unit, player.facingX, player.facingY, { friendly: true, damage: Math.round(23 * player.power), speed: 275 * unit, radius: 10 * unit, color: spell.color, life: 2.7, type: "frost", pierce: 0 });
+      spawnProjectile(player.x + aim.x * 18 * unit, player.y + aim.y * 18 * unit, aim.x, aim.y, { friendly: true, damage: Math.round(23 * player.power), speed: 275 * unit, radius: 10 * unit, color: spell.color, life: 2.7, type: "frost", pierce: 0 });
       burst(player.x, player.y, spell.color, 10, 70 * unit);
     } else {
       const range = 112 * unit * Math.pow(1.25, buffStacks("nova_range"));
@@ -1237,16 +1255,20 @@
     if (player.attackAnim > 0) {
       const size = Math.pow(2, buffStacks("long_blade"));
       const reach = 70 * unit * size;
-      const width = 18 * unit * size;
-      const fade = clamp(player.attackAnim / 0.2, 0, 1);
+      const progress = 1 - player.attackAnim / 0.2;
+      const angle = Math.atan2(player.facingY, player.facingX);
       ctx.save();
-      ctx.globalAlpha = 0.35 + fade * 0.5;
+      ctx.globalAlpha = 0.9 - progress * 0.35;
       ctx.strokeStyle = "#ffe1a0";
-      ctx.lineWidth = width * 2;
+      ctx.lineWidth = 14 * unit * size;
       ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.moveTo(player.x + player.facingX * 10 * unit, player.y + player.facingY * 10 * unit);
-      ctx.lineTo(player.x + player.facingX * reach, player.y + player.facingY * reach);
+      ctx.arc(player.x, player.y, reach * 0.88, angle - 1.05 + progress * 0.6, angle + 0.25 + progress * 0.6);
+      ctx.stroke();
+      ctx.globalAlpha *= 0.45;
+      ctx.lineWidth = 3 * unit * size;
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, reach * 0.64, angle - 0.95 + progress * 0.6, angle + 0.35 + progress * 0.6);
       ctx.stroke();
       ctx.restore();
     }
@@ -1462,10 +1484,12 @@
 
   function updateFacingFromPointer(event) {
     const pointer = pointerPosition(event);
+    input.mouseX = pointer.x;
+    input.mouseY = pointer.y;
+    input.hasMouseAim = true;
     const dx = pointer.x - player.x;
     const dy = pointer.y - player.y;
-    const length = Math.hypot(dx, dy);
-    if (length > 4) { player.facingX = dx / length; player.facingY = dy / length; if (Math.abs(dx) > 4) player.lookDirection = Math.sign(dx); }
+    if (Math.hypot(dx, dy) > 4 && Math.abs(dx) > 4) player.lookDirection = Math.sign(dx);
   }
 
   function updateJoystick(event) {
@@ -1552,11 +1576,8 @@
     window.addEventListener("resize", resizeCanvas);
 
     canvas.addEventListener("pointermove", (event) => { if (event.pointerType === "mouse" && state.scene === "playing") updateFacingFromPointer(event); });
-    canvas.addEventListener("pointerdown", (event) => { if (event.pointerType !== "mouse" || state.scene !== "playing") return; updateFacingFromPointer(event); if (event.button === 0) requestAttack(); if (event.button === 2) input.mouseBlocking = true; });
-    canvas.addEventListener("pointerup", (event) => { if (event.button === 2) input.mouseBlocking = false; });
+    canvas.addEventListener("pointerdown", (event) => { if (event.pointerType !== "mouse" || state.scene !== "playing") return; updateFacingFromPointer(event); if (event.button === 0) requestAttack(); if (event.button === 2) castSpell(state.selectedSpell); });
     canvas.addEventListener("contextmenu", (event) => event.preventDefault());
-    window.addEventListener("pointerup", (event) => { if (event.button === 2) input.mouseBlocking = false; });
-    window.addEventListener("pointercancel", () => { input.mouseBlocking = false; });
 
     ui.joystickZone.addEventListener("pointerdown", (event) => { if (state.scene !== "playing" || input.joystickPointer !== null) return; input.joystickPointer = event.pointerId; ui.joystickZone.setPointerCapture(event.pointerId); updateJoystick(event); });
     ui.joystickZone.addEventListener("pointermove", (event) => { if (event.pointerId === input.joystickPointer) updateJoystick(event); });
