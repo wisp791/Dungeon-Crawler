@@ -57,6 +57,10 @@
             </button>
           </div>
 
+          <div class="best-run" aria-label="Farthest run">
+            <span>DEEPEST DESCENT</span>
+            <strong id="bestFloorMenu">TUTORIAL</strong>
+          </div>
           <p class="menu-note">No ads. No accounts. Just one more floor.</p>
         </div>
         <div class="menu-footer" aria-hidden="true">
@@ -100,6 +104,11 @@
               <strong id="objectiveText">Learn the basics</strong>
             </div>
 
+            <div id="chamberBuffCard" class="chamber-buff-card is-hidden">
+              <span>CHAMBER BLESSING</span>
+              <strong id="chamberBuffText">None</strong>
+            </div>
+
             <div id="bossHud" class="boss-hud is-hidden">
               <span id="bossName">FLOOR GUARDIAN</span>
               <div class="boss-bar"><div id="bossFill"></div></div>
@@ -116,7 +125,8 @@
                 <span class="spell-key">3</span><span class="spell-icon nova-icon">✺</span><span class="spell-name">Nova</span><span class="cooldown-mask"></span>
               </button>
               <div class="action-hint desktop-hint"><kbd>Space</kbd><span>Strike</span></div>
-              <div class="action-hint desktop-hint"><kbd>Shift</kbd><span>Block</span></div>
+              <div class="action-hint desktop-hint"><kbd>F</kbd><span>Guard</span></div>
+              <div class="action-hint desktop-hint"><kbd>Shift</kbd><span>Dash</span></div>
             </div>
 
             <div id="toast" class="toast is-hidden" role="status"></div>
@@ -129,6 +139,7 @@
             <div class="mobile-actions">
               <button id="mobileSpell" class="touch-button spell-touch" type="button"><span>✦</span><small>Spell</small></button>
               <button id="mobileBlock" class="touch-button block-touch" type="button"><span>◇</span><small>Guard</small></button>
+              <button id="mobileDash" class="touch-button dash-touch" type="button"><span>»</span><small>Dash</small></button>
               <button id="mobileAttack" class="touch-button attack-touch" type="button"><span>⚔</span><small>Strike</small></button>
             </div>
           </div>
@@ -202,6 +213,7 @@
           <p class="modal-kicker">YOUR LIGHT FADES</p>
           <h2 id="gameOverTitle">The run is over</h2>
           <p class="run-stat">You reached <strong id="reachedFloor">Floor 1</strong></p>
+          <p class="best-stat">Deepest run: <strong id="bestFloorGameOver">Floor 1</strong></p>
           <div class="stats-row">
             <div><span id="killStat">0</span><small>foes felled</small></div>
             <div><span id="timeStat">0:00</span><small>time below</small></div>
@@ -210,6 +222,15 @@
             <button id="retryButton" class="pixel-button primary-button" type="button">Descend again</button>
             <button id="menuButton" class="text-button" type="button">Return to title</button>
           </div>
+        </div>
+      </div>
+
+      <div id="buffModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="buffTitle">
+        <div class="modal buff-modal">
+          <p class="modal-kicker">CHAMBER BLESSING</p>
+          <h2 id="buffTitle">Choose your edge</h2>
+          <p>Pick one power for this run. Blessings stack as the dungeon deepens.</p>
+          <div id="buffChoices" class="buff-choices"></div>
         </div>
       </div>
 
