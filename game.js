@@ -943,8 +943,8 @@
       const speed = 245 * unit;
       spawnProjectile(enemy.x, enemy.y, Math.cos(enemy.attackAngle), Math.sin(enemy.attackAngle), {
         friendly: false, damage: enemy.damage, speed, radius: 9 * unit,
-        color: enemy.specialColor, life: 0.5,
-        type: "homing", turnRate: 2.4, homingTime: 0.5
+        color: enemy.specialColor, life: 0.75,
+        type: "homing", turnRate: 2.4, homingTime: 0.75
       });
       burst(enemy.x, enemy.y, enemy.specialColor, 10, 75 * unit);
       return;

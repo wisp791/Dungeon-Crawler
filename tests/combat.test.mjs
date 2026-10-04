@@ -996,7 +996,7 @@ test("freeze, stun and death interrupt an active charge", () => {
 
 test("homing shots steer toward a moving player with a bounded turn rate", () => {
   const api = game();
-  api.spawnProjectile(200, 270, 1, 0, { friendly: false, damage: 30, speed: 245, radius: 9, color: "#e4714d", life: 0.5, type: "homing", turnRate: 2.4, homingTime: 0.5 });
+  api.spawnProjectile(200, 270, 1, 0, { friendly: false, damage: 30, speed: 245, radius: 9, color: "#e4714d", life: 0.75, type: "homing", turnRate: 2.4, homingTime: 0.75 });
   const shot = api.world.projectiles[0];
   api.player.x = 450; api.player.y = 470;
   api.updateProjectiles(0.05);
@@ -1010,7 +1010,7 @@ test("homing shots steer toward a moving player with a bounded turn rate", () =>
   assert.equal(shot.life, 0);
 });
 
-test("every boss's homing projectiles expire after half a second and cannot hit afterward", () => {
+test("every boss's homing projectiles expire after 0.75 seconds and cannot hit afterward", () => {
   for (const unit of [0.7, 1, 1.65]) for (const [index, profile] of game().BOSS_CATALOG.entries()) {
     if (profile.pursuit !== "homing") continue;
     const api = game();
@@ -1025,8 +1025,8 @@ test("every boss's homing projectiles expire after half a second and cannot hit 
     api.beginEnemyAttack(boss, "homing", 0.1);
     api.resolveEnemyAttack(boss);
     const shot = api.world.projectiles[0];
-    assert.equal(shot.life, 0.5);
-    for (let frame = 0; frame < 29; frame++) api.updateProjectiles(1 / 60);
+    assert.equal(shot.life, 0.75);
+    for (let frame = 0; frame < 44; frame++) api.updateProjectiles(1 / 60);
     assert.ok(shot.life > 0);
     api.drawProjectiles();
     assert.ok(api.drawing.some(call => call.method === "arc"));
