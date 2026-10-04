@@ -39,6 +39,10 @@
     { id: "frost", name: "Frost", cost: 22, cooldown: 7, color: "#66cce4" },
     { id: "nova", name: "Nova", cost: 35, cooldown: 9, color: "#be84f0" }
   ];
+  const SLASH_DURATION = 0.2;
+  const SLASH_HALF_ANGLE = Math.acos(0.28);
+  const CHARGE_DURATION = 0.9;
+  const CHARGE_THRESHOLD = 0.18;
   const FLOOR_NAMES = ["THE HOLLOW HALLS", "THE SUNKEN VAULT", "THE CINDER CELLS", "THE VIOLET CRYPT", "THE IRON CHAPEL", "THE ECHOING DEEP"];
   const BOSS_CATALOG = [
     { id: "bone", name: "THE BONE WARDEN", special: "beam", color: "#e2d1aa" },
@@ -52,7 +56,7 @@
     { id: "nova_range", icon: "✺", name: "Expanding Star", description: "Nova radius grows by 25%." },
     { id: "burn_double", icon: "●", name: "Hungry Flame", description: "Ember burn damage is doubled." },
     { id: "frost_range", icon: "✦", name: "Shatterfield", description: "Frost impact radius grows by 30%." },
-    { id: "physical", icon: "⚔", name: "Heavy Edge", description: "Physical strike damage increases by 50%." },
+    { id: "physical", icon: "⚔", name: "Heavy Edge", description: "Slash and charged shot damage increases by 50%." },
     { id: "perfect_wave", icon: "◇", name: "Answering Guard", description: "Perfect blocks blast nearby foes for 50% of current health." },
     { id: "health20", icon: "+", name: "Second Wind", description: "Heal 20 health immediately." },
     { id: "max50", icon: "♥", name: "Giant's Heart", description: "Gain 50 max health and heal 50." },
@@ -64,7 +68,7 @@
   const tutorials = {
     desktop: [
       { title: "Move freely", description: "Use WASD or the arrow keys to explore the tiled arena. Move in any direction and keep your distance.", visual: '<div class="tutorial-keys"><span>W</span><span>A</span><span>S</span><span>D</span></div>' },
-      { title: "Strike, guard & dash", description: "Press Space to slash, hold E to guard, and tap Left Shift to dash. A perfectly timed block stops all damage.", visual: '<div class="tutorial-icon">⚔ <span style="color:#9fa9b6">◇</span> »</div>' },
+      { title: "Strike, guard & dash", description: "Aim with the crosshair. Tap left-click or Space to slash; hold left-click, then release to fire a charged shot. The crosshair glows when ready. Hold E to guard and tap Left Shift to dash.", visual: '<div class="tutorial-icon">⚔ <span style="color:#9fa9b6">◇</span> »</div>' },
       { title: "Wield magic", description: "Aim with the mouse, then right-click to cast your selected spell. Keys 1, 2, and 3 select and cast Ember, Frost, or Nova.", visual: '<div class="tutorial-icon"><span style="color:#f1743e">●</span> <span style="color:#66cce4">✦</span> <span style="color:#be84f0">✺</span></div>' },
       { title: "Defeat. Descend.", description: "Clear the floor to summon its guardian. Defeat the boss, then step onto the glowing stairs. The dungeon never ends.", visual: '<div class="tutorial-icon">☠ ↓</div>' }
     ],
@@ -84,11 +88,11 @@
     scene: "menu", floor: 0, kills: 0, runStartedAt: 0, tutorialStep: 0, settingsOrigin: "menu",
     controlMode: tutorials[storedControlMode] ? storedControlMode : detectedControlMode,
     screenShake: typeof storedScreenShake === "boolean" ? storedScreenShake : true, selectedSpell: 0, lastTime: performance.now(),
-    accumulator: 0, unit: 1, shakeAmount: 0, toastTimer: 0, transitionTimer: 0,
+    accumulator: 0, unit: 1, shakeAmount: 0, shakeX: 0, shakeY: 0, toastTimer: 0, transitionTimer: 0,
     bestFloor: Math.max(0, Number(loadPreference("bestFloor", 0)) || 0), runSeed: 0, buffs: {}, latestBuff: ""
   };
 
-  const input = { keys: new Set(), joystickX: 0, joystickY: 0, joystickPointer: null, mobileBlocking: false, mouseX: 0, mouseY: 0, hasMouseAim: false };
+  const input = { keys: new Set(), joystickX: 0, joystickY: 0, joystickPointer: null, mobileBlocking: false, mouseX: 0, mouseY: 0, mouseClientX: null, mouseClientY: null, hasMouseAim: false, pointerInside: false, attackPointer: null };
   const world = {
     width: 960, height: 540, theme: "grass", name: "THE SUNLIT VERGE", obstacles: [], torches: [], enemies: [],
     projectiles: [], particles: [], floaters: [], pickups: [], hazards: [], boss: null, bossSpawned: false,
@@ -113,7 +117,7 @@
       stamina: 100, maxStamina: 100, facingX: 0, facingY: -1, attackCooldown: 0, attackAnim: 0,
       spellCooldowns: [0, 0, 0], invulnerable: 0, hurtFlash: 0, blocking: false, wasBlocking: false,
       blockStartedAt: 0, guardBroken: 0, walkCycle: 0, power: 1, lookDirection: 1,
-      dashCooldown: 0, dashTimer: 0, poisonTimer: 0, poisonTick: 0
+      dashCooldown: 0, dashTimer: 0, poisonTimer: 0, poisonTick: 0, slash: null, chargeTime: 0
     };
   }
 
@@ -158,6 +162,7 @@
     world.height = nextHeight;
     state.unit = clamp(Math.min(nextWidth / 960, nextHeight / 540), 0.7, 1.65);
     if (state.scene !== "menu" && oldWidth && oldHeight) scaleWorld(nextWidth / oldWidth, nextHeight / oldHeight, state.unit / oldUnit);
+    if (input.mouseClientX !== null) updateFacingFromPointer({ clientX: input.mouseClientX, clientY: input.mouseClientY });
   }
 
   function scaleWorld(scaleX, scaleY, sizeScale) {
@@ -165,6 +170,14 @@
     points.forEach((item) => { item.x *= scaleX; item.y *= scaleY; });
     world.obstacles.forEach((obstacle) => { obstacle.x *= scaleX; obstacle.y *= scaleY; obstacle.w *= scaleX; obstacle.h *= scaleY; });
     if (input.hasMouseAim) { input.mouseX *= scaleX; input.mouseY *= scaleY; }
+    state.shakeX *= scaleX;
+    state.shakeY *= scaleY;
+    if (player.slash) {
+      player.slash.x *= scaleX;
+      player.slash.y *= scaleY;
+      player.slash.reach *= sizeScale;
+      player.slash.angle = Math.atan2(Math.sin(player.slash.angle) * scaleY, Math.cos(player.slash.angle) * scaleX);
+    }
     [...world.enemies, ...(world.boss ? [world.boss] : [])].forEach((enemy) => {
       enemy.radius *= sizeScale;
       enemy.speed *= sizeScale;
@@ -176,6 +189,8 @@
       projectile.radius *= sizeScale;
       projectile.vx *= scaleX;
       projectile.vy *= scaleY;
+      if (projectile.targetX !== undefined) { projectile.targetX *= scaleX; projectile.targetY *= scaleY; }
+      if (projectile.blastRadius) projectile.blastRadius *= sizeScale;
     });
     world.hazards.forEach((hazard) => { hazard.radius *= sizeScale; });
     world.particles.forEach((particle) => {
@@ -206,13 +221,14 @@
   }
 
   function generateFloor(floor) {
+    cancelCharge();
     const difficulty = floor;
     world.rng = mulberry32(seedForFloor(floor));
     world.theme = floor === 0 ? "grass" : floor % 4 === 0 ? "crypt" : floor % 3 === 0 ? "ember" : "stone";
     world.name = floorName(floor);
     Object.assign(world, { obstacles: [], torches: [], enemies: [], projectiles: [], particles: [], floaters: [], pickups: [], hazards: [], boss: null, bossSpawned: false, floorCleared: false, stairs: null, elapsed: 0, objective: "", layout: floor === 0 ? "field" : ["scattered", "cross", "ring", "lanes", "sanctum"][Math.floor(world.rng() * 5)] });
     ui.bossHud.classList.add("is-hidden");
-    Object.assign(player, { x: world.width * 0.5, y: world.height * 0.79, facingX: 0, facingY: -1, attackCooldown: 0, attackAnim: 0, spellCooldowns: [0, 0, 0], invulnerable: 0.7, blocking: false, wasBlocking: false, guardBroken: 0, stamina: player.maxStamina, dashCooldown: 0, poisonTimer: 0, poisonTick: 0 });
+    Object.assign(player, { x: world.width * 0.5, y: world.height * 0.79, facingX: 0, facingY: -1, attackCooldown: 0, attackAnim: 0, slash: null, spellCooldowns: [0, 0, 0], invulnerable: 0.7, blocking: false, wasBlocking: false, guardBroken: 0, stamina: player.maxStamina, dashCooldown: 0, poisonTimer: 0, poisonTick: 0 });
     createObstacles(floor);
     createTorches(floor);
     const count = floor === 0 ? 3 : Math.min(10, 3 + Math.ceil(difficulty * 0.58));
@@ -558,7 +574,7 @@
   }
 
   function renderControlsReference() {
-    const desktop = [["Move", "WASD / Arrows"], ["Strike", "Space / Left click"], ["Guard", "Hold E"], ["Cast selected spell", "Right click"], ["Select & cast", "1 / 2 / 3"], ["Dash", "Left Shift"], ["Pause", "Escape"]];
+    const desktop = [["Move", "WASD / Arrows"], ["Aim", "Crosshair"], ["Slash", "Space / Tap left click"], ["Charged shot", "Hold left click, release"], ["Guard", "Hold E"], ["Cast selected spell", "Right click"], ["Select & cast", "1 / 2 / 3"], ["Dash", "Left Shift"], ["Pause", "Escape"]];
     const mobile = [["Move", "Joystick"], ["Strike", "Strike button"], ["Guard", "Hold Guard"], ["Dash", "Dash button"], ["Choose spell", "Spell slots"], ["Cast again", "Spell button"]];
     const controls = state.controlMode === "desktop" ? desktop : mobile;
     ui.controlsSubtitle.textContent = state.controlMode === "desktop" ? "Keyboard & mouse" : "Touch controls";
@@ -595,6 +611,7 @@
   }
 
   function clearInput() {
+    cancelCharge();
     input.keys.clear();
     Object.assign(input, { joystickX: 0, joystickY: 0, joystickPointer: null, mobileBlocking: false });
     player.blocking = false;
@@ -613,14 +630,25 @@
     return length > 1 ? { x: x / length, y: y / length } : { x, y };
   }
 
-  function aimVector() {
+  function aimTarget() {
     if (state.controlMode === "desktop" && input.hasMouseAim) {
-      const dx = input.mouseX - player.x;
-      const dy = input.mouseY - player.y;
-      const length = Math.hypot(dx, dy);
-      if (length > 4) return { x: dx / length, y: dy / length };
+      // Pointer coordinates are on screen; attacks live in the unshaken world.
+      return { x: input.mouseX - state.shakeX, y: input.mouseY - state.shakeY };
     }
+    return { x: player.x + player.facingX * 180 * state.unit, y: player.y + player.facingY * 180 * state.unit };
+  }
+
+  function aimVector() {
+    const target = aimTarget();
+    const dx = target.x - player.x;
+    const dy = target.y - player.y;
+    const length = Math.hypot(dx, dy);
+    if (length > 0.001) return { x: dx / length, y: dy / length };
     return { x: player.facingX, y: player.facingY };
+  }
+
+  function guardRequested() {
+    return (input.keys.has("KeyE") || input.mobileBlocking) && player.guardBroken <= 0 && player.stamina > 0;
   }
 
   function update(dt) {
@@ -659,8 +687,9 @@
       player.poisonTick -= dt;
       if (player.poisonTick <= 0) { player.poisonTick = 0.72; damagePlayer(4 + Math.floor(state.floor * 0.2), null, true); }
     }
-    const wantsBlock = (input.keys.has("KeyE") || input.mobileBlocking) && player.guardBroken <= 0;
-    player.blocking = wantsBlock && player.stamina > 0;
+    player.blocking = guardRequested();
+    if (player.blocking) cancelCharge();
+    else if (input.attackPointer !== null) player.chargeTime = Math.min(CHARGE_DURATION, player.chargeTime + dt);
     if (player.blocking && !player.wasBlocking) player.blockStartedAt = performance.now();
     if (player.blocking) {
       player.stamina = Math.max(0, player.stamina - 55 * dt);
@@ -679,6 +708,10 @@
       const speed = player.speed * state.unit * (player.blocking ? 0.5 : 1);
       moveEntity(player, movement.x * speed * dt, movement.y * speed * dt, player.radius * state.unit);
       player.walkCycle += dt * 11;
+    }
+    if (state.controlMode === "desktop" && input.hasMouseAim) {
+      const aim = aimVector();
+      if (Math.abs(aim.x) > 0.12) player.lookDirection = Math.sign(aim.x);
     }
     if (world.stairs && distance(player, world.stairs) < 30 * state.unit) descendFloor();
   }
@@ -821,14 +854,21 @@
     world.projectiles.forEach((projectile) => {
       if (projectile.life <= 0) return;
       projectile.life -= dt;
-      projectile.x += projectile.vx * dt;
-      projectile.y += projectile.vy * dt;
+      const travel = projectile.type === "nova"
+        ? Math.min(1, Math.hypot(projectile.targetX - projectile.x, projectile.targetY - projectile.y) / Math.max(0.001, Math.hypot(projectile.vx, projectile.vy) * dt)) : 1;
+      projectile.x += projectile.vx * dt * travel;
+      projectile.y += projectile.vy * dt * travel;
       projectile.pulse += dt * 8;
       if (projectile.x < -30 || projectile.x > world.width + 30 || projectile.y < -30 || projectile.y > world.height + 30 || collidesWithObstacle(projectile.x, projectile.y, projectile.radius)) {
         if (projectile.type === "frost") detonateFrost(projectile);
+        if (projectile.type === "nova") detonateNova(projectile);
         if (projectile.type === "poison") createHazard(projectile.x, projectile.y, 38 * state.unit, "poison", 4.5);
         projectile.life = 0;
         burst(projectile.x, projectile.y, projectile.color, 4, 40 * state.unit);
+        return;
+      }
+      if (projectile.type === "nova" && (travel < 1 || distance(projectile, { x: projectile.targetX, y: projectile.targetY }) < 0.1 || projectile.life <= 0)) {
+        detonateNova(projectile);
         return;
       }
       if (projectile.friendly) {
@@ -837,6 +877,7 @@
           if (distance(projectile, enemy) <= projectile.radius + enemy.radius) {
             projectile.hit.add(enemy);
             if (projectile.type === "frost") { detonateFrost(projectile); break; }
+            if (projectile.type === "nova") { detonateNova(projectile); break; }
             damageEnemy(enemy, projectile.damage, projectile.vx, projectile.vy, projectile.type);
             if (projectile.type === "ember") {
               enemy.burnTimer = Math.max(enemy.burnTimer, 4.1);
@@ -923,10 +964,25 @@
     return world.obstacles.some((rect) => circleIntersectsRect(x, y, radius, rect));
   }
 
+  function slashHitsEnemy(slash, enemy) {
+    const dx = enemy.x - slash.x;
+    const dy = enemy.y - slash.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > slash.reach + enemy.radius) return false;
+    const offset = Math.atan2(dy, dx) - slash.angle;
+    const difference = Math.abs(Math.atan2(Math.sin(offset), Math.cos(offset)));
+    if (difference <= slash.halfAngle) return true;
+    // Include an enemy only when its body overlaps a boundary of the visible sector.
+    const edge = slash.angle + Math.sign(Math.sin(offset)) * slash.halfAngle;
+    const along = clamp(dx * Math.cos(edge) + dy * Math.sin(edge), 0, slash.reach);
+    return Math.hypot(dx - Math.cos(edge) * along, dy - Math.sin(edge) * along) <= enemy.radius;
+  }
+
   function requestAttack() {
-    if (state.scene !== "playing" || player.attackCooldown > 0 || player.blocking) return;
+    if (state.scene !== "playing" || player.attackCooldown > 0 || player.blocking || guardRequested()) return;
+    cancelCharge();
     player.attackCooldown = 0.38;
-    player.attackAnim = 0.2;
+    player.attackAnim = SLASH_DURATION;
     const unit = state.unit;
     const aim = aimVector();
     player.facingX = aim.x;
@@ -934,24 +990,56 @@
     if (Math.abs(aim.x) > 0.12) player.lookDirection = Math.sign(aim.x);
     const size = Math.pow(2, buffStacks("long_blade"));
     const reach = 70 * unit * size;
+    // Damage and animation share this snapshot, even if movement, dash, or aim changes.
+    const slash = { x: player.x, y: player.y, angle: Math.atan2(aim.y, aim.x), reach, halfAngle: SLASH_HALF_ANGLE };
+    player.slash = slash;
     [...world.enemies, ...(world.boss && !world.boss.dead ? [world.boss] : [])].forEach((enemy) => {
       if (enemy.dead) return;
-      const dx = enemy.x - player.x;
-      const dy = enemy.y - player.y;
-      const dist = Math.max(0.001, Math.hypot(dx, dy));
-      const facingDot = (dx / dist) * aim.x + (dy / dist) * aim.y;
-      if (dist <= reach + enemy.radius && facingDot >= 0.28) damageEnemy(enemy, Math.round(24 * player.power * Math.pow(1.5, buffStacks("physical"))), aim.x * 155 * unit, aim.y * 155 * unit, "melee");
+      if (slashHitsEnemy(slash, enemy)) damageEnemy(enemy, Math.round(24 * player.power * Math.pow(1.5, buffStacks("physical"))), aim.x * 155 * unit, aim.y * 155 * unit, "melee");
     });
     burst(player.x + aim.x * 36 * unit, player.y + aim.y * 36 * unit, "#f2dca4", 4, 62 * unit);
   }
 
+  function cancelCharge() {
+    const pointer = input.attackPointer;
+    input.attackPointer = null;
+    player.chargeTime = 0;
+    if (pointer !== null && canvas.hasPointerCapture(pointer)) canvas.releasePointerCapture(pointer);
+  }
+
+  function startCharge(pointer) {
+    if (state.scene !== "playing" || state.controlMode !== "desktop" || input.attackPointer !== null || player.attackCooldown > 0 || player.blocking || guardRequested()) return;
+    input.attackPointer = pointer;
+    player.chargeTime = 0;
+    canvas.setPointerCapture(pointer);
+  }
+
+  function releaseCharge() {
+    const held = player.chargeTime;
+    cancelCharge();
+    if (state.scene !== "playing" || !input.pointerInside || player.attackCooldown > 0 || player.blocking || guardRequested()) return;
+    if (held < CHARGE_THRESHOLD) { requestAttack(); return; }
+    const strength = clamp(held / CHARGE_DURATION, 0, 1);
+    const aim = aimVector();
+    const unit = state.unit;
+    const speed = lerp(420, 620, strength) * unit;
+    player.attackCooldown = 0.5;
+    spawnProjectile(player.x + aim.x * 18 * unit, player.y + aim.y * 18 * unit, aim.x, aim.y, {
+      friendly: true, damage: Math.round(lerp(16, 48, strength) * player.power * Math.pow(1.5, buffStacks("physical"))),
+      speed, radius: lerp(5, 9, strength) * unit, color: strength === 1 ? "#ffe2a0" : "#d4def1",
+      life: Math.hypot(world.width, world.height) / speed + 0.2, type: "charged", pierce: strength === 1 ? 1 : 0
+    });
+    burst(player.x + aim.x * 18 * unit, player.y + aim.y * 18 * unit, "#ffe2a0", 8, 90 * unit);
+  }
+
   function castSpell(index = state.selectedSpell) {
-    if (state.scene !== "playing" || player.blocking) return;
+    if (state.scene !== "playing" || player.blocking || guardRequested()) return;
     const spell = SPELLS[index];
     state.selectedSpell = index;
     updateSpellSelection();
     if (player.spellCooldowns[index] > 0) { showToast(`${spell.name.toUpperCase()} IS RECHARGING`); return; }
     if (player.mana < spell.cost) { showToast("NOT ENOUGH MANA"); return; }
+    cancelCharge();
     player.mana -= spell.cost;
     player.spellCooldowns[index] = spellCooldown(index);
     const unit = state.unit;
@@ -966,31 +1054,45 @@
       spawnProjectile(player.x + aim.x * 18 * unit, player.y + aim.y * 18 * unit, aim.x, aim.y, { friendly: true, damage: Math.round(23 * player.power), speed: 275 * unit, radius: 10 * unit, color: spell.color, life: 2.7, type: "frost", pierce: 0 });
       burst(player.x, player.y, spell.color, 10, 70 * unit);
     } else {
-      const range = 112 * unit * Math.pow(1.25, buffStacks("nova_range"));
-      [...world.enemies, ...(world.boss && !world.boss.dead ? [world.boss] : [])].forEach((enemy) => {
-        if (!enemy.dead && distance(player, enemy) <= range + enemy.radius) {
-          const dx = enemy.x - player.x;
-          const dy = enemy.y - player.y;
-          const length = Math.max(1, Math.hypot(dx, dy));
-          damageEnemy(enemy, Math.round(38 * player.power), (dx / length) * 430 * unit, (dy / length) * 430 * unit, "nova");
-        }
+      const target = aimTarget();
+      spawnProjectile(player.x, player.y, aim.x, aim.y, {
+        friendly: true, damage: Math.round(38 * player.power), speed: 320 * unit,
+        radius: 10 * unit, color: spell.color, life: distance(player, target) / (320 * unit) + 0.2,
+        type: "nova", targetX: target.x, targetY: target.y, blastRadius: 112 * unit * Math.pow(1.25, buffStacks("nova_range"))
       });
-      for (let particle = 0; particle < 28; particle += 1) {
-        const angle = (Math.PI * 2 * particle) / 28;
-        addParticle(player.x + Math.cos(angle) * 20 * unit, player.y + Math.sin(angle) * 20 * unit, Math.cos(angle) * 190 * unit, Math.sin(angle) * 190 * unit, spell.color, 0.55, 4 * unit);
-      }
-      state.shakeAmount = state.screenShake ? 7 * unit : 0;
+      burst(player.x, player.y, spell.color, 10, 70 * unit);
     }
     updateHud();
   }
 
+  function detonateNova(projectile) {
+    if (projectile.detonated) return;
+    projectile.detonated = true;
+    projectile.life = 0;
+    [...world.enemies, ...(world.boss && !world.boss.dead ? [world.boss] : [])].forEach((enemy) => {
+      if (!enemy.dead && distance(projectile, enemy) <= projectile.blastRadius + enemy.radius) {
+        const dx = enemy.x - projectile.x;
+        const dy = enemy.y - projectile.y;
+        const length = Math.max(1, Math.hypot(dx, dy));
+        damageEnemy(enemy, projectile.damage, (dx / length) * 430 * state.unit, (dy / length) * 430 * state.unit, "nova");
+      }
+    });
+    createHazard(projectile.x, projectile.y, projectile.blastRadius, "nova", 0.35);
+    for (let index = 0; index < 28; index += 1) {
+      const angle = Math.PI * 2 * index / 28;
+      addParticle(projectile.x + Math.cos(angle) * 20 * state.unit, projectile.y + Math.sin(angle) * 20 * state.unit, Math.cos(angle) * 190 * state.unit, Math.sin(angle) * 190 * state.unit, projectile.color, 0.55, 4 * state.unit);
+    }
+    state.shakeAmount = state.screenShake ? 7 * state.unit : 0;
+  }
+
   function spawnProjectile(x, y, dx, dy, options) {
     const length = Math.max(0.001, Math.hypot(dx, dy));
-    world.projectiles.push({ x, y, vx: (dx / length) * options.speed, vy: (dy / length) * options.speed, friendly: options.friendly, damage: options.damage, radius: options.radius, color: options.color, life: options.life, type: options.type, pierce: options.pierce ?? 0, hit: new Set(), pulse: 0, detonated: false });
+    world.projectiles.push({ x, y, vx: (dx / length) * options.speed, vy: (dy / length) * options.speed, friendly: options.friendly, damage: options.damage, radius: options.radius, color: options.color, life: options.life, type: options.type, pierce: options.pierce ?? 0, hit: new Set(), pulse: 0, detonated: false, targetX: options.targetX, targetY: options.targetY, blastRadius: options.blastRadius });
   }
 
   function requestDash() {
-    if (state.scene !== "playing" || player.dashCooldown > 0 || player.blocking) return;
+    if (state.scene !== "playing" || player.dashCooldown > 0 || player.blocking || guardRequested()) return;
+    cancelCharge();
     const movement = moveVector();
     const length = Math.hypot(movement.x, movement.y);
     const dx = length > 0.1 ? movement.x / length : player.facingX;
@@ -1142,10 +1244,16 @@
   }
 
   function render(time) {
+    if (input.mouseClientX !== null) updateFacingFromPointer({ clientX: input.mouseClientX, clientY: input.mouseClientY });
+    const mouseControl = state.scene === "playing" && state.controlMode === "desktop";
+    canvas.classList.toggle("is-playing", mouseControl);
+    canvas.classList.toggle("is-aiming", mouseControl && input.hasMouseAim && input.pointerInside);
     if (ui.game.classList.contains("is-hidden")) return;
     const shake = state.screenShake ? state.shakeAmount : 0;
+    state.shakeX = Math.round((Math.random() - 0.5) * shake);
+    state.shakeY = Math.round((Math.random() - 0.5) * shake);
     ctx.save();
-    ctx.translate(Math.round((Math.random() - 0.5) * shake), Math.round((Math.random() - 0.5) * shake));
+    ctx.translate(state.shakeX, state.shakeY);
     drawBackground(time);
     drawStairs(time);
     drawObstacles();
@@ -1156,6 +1264,43 @@
     drawParticles();
     drawFloaters();
     drawLighting(time);
+    ctx.restore();
+    drawCrosshair();
+  }
+
+  function drawCrosshair() {
+    if (state.scene !== "playing" || state.controlMode !== "desktop" || !input.hasMouseAim || !input.pointerInside) return;
+    const charging = input.attackPointer !== null;
+    const progress = charging ? clamp(player.chargeTime / CHARGE_DURATION, 0, 1) : 0;
+    const ready = charging && progress === 1;
+    const scale = clamp(state.unit, 0.85, 1.3);
+    const radius = (charging ? lerp(22, 7, progress) : 11) * scale;
+    ctx.save();
+    // Draw after the camera transform so this cursor stays exactly under the mouse.
+    ctx.translate(input.mouseX, input.mouseY);
+    ctx.strokeStyle = ready ? "#ffe2a0" : charging ? "#e8ca87" : "#edf1f7";
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 1.5 * scale;
+    ctx.shadowColor = ready ? "#ffc966" : "#080a0f";
+    ctx.shadowBlur = ready ? 15 * scale : 3;
+    ctx.beginPath();
+    for (let index = 0; index < 4; index += 1) {
+      const angle = index * Math.PI / 2;
+      ctx.moveTo(Math.cos(angle) * (radius + 3 * scale), Math.sin(angle) * (radius + 3 * scale));
+      ctx.lineTo(Math.cos(angle) * (radius + 9 * scale), Math.sin(angle) * (radius + 9 * scale));
+    }
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillRect(-scale, -scale, 2 * scale, 2 * scale);
+    if (charging) {
+      ctx.lineWidth = 3 * scale;
+      ctx.beginPath(); ctx.arc(0, 0, radius, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2); ctx.stroke();
+    }
+    if (ready) {
+      ctx.font = `bold ${10 * scale}px monospace`;
+      ctx.textAlign = "center";
+      ctx.fillText("READY", 0, 30 * scale);
+    }
     ctx.restore();
   }
 
@@ -1252,23 +1397,29 @@
     const unit = state.unit;
     const moving = Math.abs(moveVector().x) + Math.abs(moveVector().y) > 0;
     const bob = moving ? Math.sin(player.walkCycle) * 2 * unit : Math.sin(time * 0.003) * 0.7 * unit;
-    if (player.attackAnim > 0) {
-      const size = Math.pow(2, buffStacks("long_blade"));
-      const reach = 70 * unit * size;
-      const progress = 1 - player.attackAnim / 0.2;
-      const angle = Math.atan2(player.facingY, player.facingX);
+    if (player.attackAnim > 0 && player.slash) {
+      const { x, y, angle, reach, halfAngle } = player.slash;
+      const progress = 1 - player.attackAnim / SLASH_DURATION;
       ctx.save();
-      ctx.globalAlpha = 0.9 - progress * 0.35;
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+      // The faint sector is the exact damage footprint. Its curved edge and the
+      // sweeping crescent share the attack's saved angle and reach, never movement-facing.
+      ctx.fillStyle = "#ffe1a0";
+      ctx.globalAlpha = (1 - progress) * 0.13;
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, reach, -halfAngle, halfAngle); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 0.65 * (1 - progress * 0.6);
+      ctx.beginPath();
+      ctx.arc(0, 0, reach, -halfAngle, halfAngle);
+      ctx.arc(0, 0, reach * 0.78, halfAngle, -halfAngle, true);
+      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 0.95 * (1 - progress * 0.65);
       ctx.strokeStyle = "#ffe1a0";
-      ctx.lineWidth = 14 * unit * size;
+      ctx.lineWidth = 3 * unit;
       ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.arc(player.x, player.y, reach * 0.88, angle - 1.05 + progress * 0.6, angle + 0.25 + progress * 0.6);
-      ctx.stroke();
-      ctx.globalAlpha *= 0.45;
-      ctx.lineWidth = 3 * unit * size;
-      ctx.beginPath();
-      ctx.arc(player.x, player.y, reach * 0.64, angle - 0.95 + progress * 0.6, angle + 0.35 + progress * 0.6);
+      const start = -halfAngle + progress * (halfAngle * 2 - 1.3);
+      ctx.arc(0, 0, reach * 0.94, start, start + 1.3);
       ctx.stroke();
       ctx.restore();
     }
@@ -1419,6 +1570,16 @@
 
   function drawHazards(time) {
     world.hazards.forEach((hazard) => {
+      if (hazard.type === "nova") {
+        ctx.save();
+        ctx.globalAlpha = clamp(hazard.life / hazard.maxLife, 0, 1);
+        ctx.fillStyle = "rgba(190,132,240,.18)";
+        ctx.strokeStyle = "#d7a3ff";
+        ctx.lineWidth = 3 * state.unit;
+        ctx.beginPath(); ctx.arc(hazard.x, hazard.y, hazard.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.restore();
+        return;
+      }
       const pulse = 0.68 + Math.sin(time * 0.008 + hazard.phase) * 0.13;
       const alpha = clamp(hazard.life / Math.min(1, hazard.maxLife), 0, 1);
       ctx.save();
@@ -1479,17 +1640,21 @@
 
   function pointerPosition(event) {
     const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
     return { x: ((event.clientX - rect.left) / rect.width) * canvas.width, y: ((event.clientY - rect.top) / rect.height) * canvas.height };
   }
 
   function updateFacingFromPointer(event) {
+    input.mouseClientX = event.clientX;
+    input.mouseClientY = event.clientY;
     const pointer = pointerPosition(event);
+    if (!pointer) { input.pointerInside = false; return; }
     input.mouseX = pointer.x;
     input.mouseY = pointer.y;
     input.hasMouseAim = true;
-    const dx = pointer.x - player.x;
-    const dy = pointer.y - player.y;
-    if (Math.hypot(dx, dy) > 4 && Math.abs(dx) > 4) player.lookDirection = Math.sign(dx);
+    input.pointerInside = pointer.x >= 0 && pointer.x <= canvas.width && pointer.y >= 0 && pointer.y <= canvas.height;
+    const aim = aimVector();
+    if (Math.abs(aim.x) > 0.12) player.lookDirection = Math.sign(aim.x);
   }
 
   function updateJoystick(event) {
@@ -1566,6 +1731,7 @@
       if (event.code === "Escape") { if (state.scene === "playing") openPause(); else if (state.scene === "paused") resumeGame(); return; }
       if (state.scene !== "playing") return;
       input.keys.add(event.code);
+      if (event.code === "KeyE") cancelCharge();
       if (event.repeat) return;
       if (event.code === "ShiftLeft") { event.preventDefault(); requestDash(); return; }
       if (["Digit1", "Digit2", "Digit3", "Numpad1", "Numpad2", "Numpad3"].includes(event.code)) { const index = Number(event.code.slice(-1)) - 1; state.selectedSpell = index; castSpell(index); }
@@ -1575,8 +1741,24 @@
     document.addEventListener("visibilitychange", () => { if (document.hidden) { clearInput(); if (state.scene === "playing") openPause(); } });
     window.addEventListener("resize", resizeCanvas);
 
-    canvas.addEventListener("pointermove", (event) => { if (event.pointerType === "mouse" && state.scene === "playing") updateFacingFromPointer(event); });
-    canvas.addEventListener("pointerdown", (event) => { if (event.pointerType !== "mouse" || state.scene !== "playing") return; updateFacingFromPointer(event); if (event.button === 0) requestAttack(); if (event.button === 2) castSpell(state.selectedSpell); });
+    canvas.addEventListener("pointerenter", (event) => { if (event.pointerType === "mouse" && state.scene === "playing") updateFacingFromPointer(event); });
+    canvas.addEventListener("pointerleave", () => { input.pointerInside = false; });
+    window.addEventListener("pointermove", (event) => { if (event.pointerType === "mouse") updateFacingFromPointer(event); });
+    canvas.addEventListener("pointerdown", (event) => {
+      if (event.pointerType !== "mouse" || state.scene !== "playing" || state.controlMode !== "desktop") return;
+      event.preventDefault();
+      updateFacingFromPointer(event);
+      if (event.button === 0) startCharge(event.pointerId);
+      if (event.button === 2) castSpell(state.selectedSpell);
+    });
+    canvas.addEventListener("pointerup", (event) => {
+      if (event.pointerType !== "mouse" || event.button !== 0 || event.pointerId !== input.attackPointer) return;
+      updateFacingFromPointer(event);
+      releaseCharge();
+    });
+    const cancelPointerCharge = (event) => { if (event.pointerId === input.attackPointer) cancelCharge(); };
+    canvas.addEventListener("pointercancel", cancelPointerCharge);
+    canvas.addEventListener("lostpointercapture", cancelPointerCharge);
     canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
     ui.joystickZone.addEventListener("pointerdown", (event) => { if (state.scene !== "playing" || input.joystickPointer !== null) return; input.joystickPointer = event.pointerId; ui.joystickZone.setPointerCapture(event.pointerId); updateJoystick(event); });

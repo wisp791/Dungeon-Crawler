@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --test",
     "build": "node build.mjs",
     "start": "python -m http.server 4173"
   }

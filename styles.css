@@ -376,6 +376,9 @@ h1 {
   image-rendering: crisp-edges;
 }
 
+#gameCanvas.is-playing { cursor: crosshair; }
+#gameCanvas.is-aiming { cursor: none; }
+
 .hud {
   position: absolute;
   inset: 0;
