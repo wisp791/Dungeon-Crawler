@@ -22,13 +22,13 @@
     replayTutorial: $("#replayTutorial"), gameOver: $("#gameOverModal"), reachedFloor: $("#reachedFloor"),
     killStat: $("#killStat"), timeStat: $("#timeStat"), retry: $("#retryButton"), menuButton: $("#menuButton"),
     healthFill: $("#healthFill"), healthText: $("#healthText"), manaFill: $("#manaFill"), manaText: $("#manaText"),
-    enemyCount: $("#enemyCount"), areaLabel: $("#areaLabel"), floorLabel: $("#floorLabel"),
+    enemyCount: $("#enemyCount"), floorLabel: $("#floorLabel"),
     objectiveText: $("#objectiveText"), bossHud: $("#bossHud"), bossName: $("#bossName"), bossFill: $("#bossFill"),
     toast: $("#toast"), mobileControls: $("#mobileControls"), joystickZone: $("#joystickZone"),
     joystickKnob: $("#joystickKnob"), mobileAttack: $("#mobileAttack"), mobileBlock: $("#mobileBlock"),
     mobileSpell: $("#mobileSpell"), mobileDash: $("#mobileDash"), controlsGrid: $("#controlsGrid"), controlsSubtitle: $("#controlsSubtitle"),
     shakeToggle: $("#shakeToggle"), floorTransition: $("#floorTransition"),
-    transitionFloor: $("#transitionFloor"), transitionName: $("#transitionName"),
+    transitionFloor: $("#transitionFloor"),
     bestFloorMenu: $("#bestFloorMenu"), bestFloorGameOver: $("#bestFloorGameOver"),
     chamberBuffCard: $("#chamberBuffCard"), chamberBuffText: $("#chamberBuffText"),
     buffModal: $("#buffModal"), buffChoices: $("#buffChoices")
@@ -53,19 +53,18 @@
   };
   const sprites = Object.fromEntries(Object.entries(SPRITE_FILES).map(([id, file]) => [id, { file: `sprites/${file}.png`, image: null, source: null }]));
   const assets = { ready: false };
-  const FLOOR_NAMES = ["THE HOLLOW HALLS", "THE SUNKEN VAULT", "THE CINDER CELLS", "THE VIOLET CRYPT", "THE IRON CHAPEL", "THE ECHOING DEEP"];
   const BOSS_CATALOG = [
-    { id: "bone", name: "THE BONE WARDEN", special: "beam", color: "#e2d1aa" },
-    { id: "cinder", name: "THE CINDER EYE", special: "aoe", color: "#e4714d" },
-    { id: "hollow", name: "THE HOLLOW KNIGHT", special: "charge", color: "#8ba0ba" },
-    { id: "veil", name: "THE VEIL KEEPER", special: "volley", color: "#bd80d0" },
-    { id: "plague", name: "THE PLAGUE MATRON", special: "poison", color: "#9fca5b" },
-    { id: "storm", name: "THE STORM IDOL", special: "storm", color: "#68c9ed" }
+    { id: "bone", name: "THE BONE WARDEN", special: "beam", pursuit: "homing", color: "#e2d1aa" },
+    { id: "cinder", name: "THE CINDER EYE", special: "aoe", pursuit: "homing", color: "#e4714d" },
+    { id: "hollow", name: "THE HOLLOW KNIGHT", special: "charge", pursuit: "charge", color: "#8ba0ba" },
+    { id: "veil", name: "THE VEIL KEEPER", special: "volley", pursuit: "homing", color: "#bd80d0" },
+    { id: "plague", name: "THE PLAGUE MATRON", special: "poison", pursuit: "homing", color: "#9fca5b" },
+    { id: "storm", name: "THE STORM IDOL", special: "storm", pursuit: "charge", color: "#68c9ed" }
   ];
   const BUFF_CATALOG = [
     { id: "nova_range", icon: "✺", name: "Expanding Star", description: "Nova radius grows by 25%." },
     { id: "burn_double", icon: "●", name: "Hungry Flame", description: "Ember burn damage is doubled." },
-    { id: "frost_range", icon: "✦", name: "Shatterfield", description: "Frost impact radius grows by 30%." },
+    { id: "frost_range", icon: "✦", name: "Freezing Cold", description: "Frost impact radius grows by 30%." },
     { id: "physical", icon: "⚔", name: "Heavy Edge", description: "Slash and charged shot damage increases by 50%." },
     { id: "perfect_wave", icon: "◇", name: "Answering Guard", description: "Perfect blocks blast nearby foes for 50% of current health." },
     { id: "health20", icon: "+", name: "Second Wind", description: "Gain 20 temporary health for this chamber." },
@@ -79,7 +78,7 @@
     desktop: [
       { title: "Move freely", description: "Use WASD or the arrow keys to explore the tiled arena. Move in any direction and keep your distance.", visual: '<div class="tutorial-keys"><span>W</span><span>A</span><span>S</span><span>D</span></div>' },
       { title: "Strike, guard & dash", description: "Aim with the crosshair. Tap left-click or Space to slash; hold left-click, then release to fire a charged shot. The crosshair glows when ready. Hold E to guard and tap Left Shift to dash.", visual: '<div class="tutorial-icon">⚔ <span style="color:#9fa9b6">◇</span> »</div>' },
-      { title: "Wield magic", description: "Aim with the mouse, then right-click to cast your selected spell. Keys 1, 2, and 3 select and cast Ember, Frost, or Nova.", visual: '<div class="tutorial-icon"><span style="color:#f1743e">●</span> <span style="color:#66cce4">✦</span> <span style="color:#be84f0">✺</span></div>' },
+      { title: "Wield magic", description: "Keys 1, 2, and 3 equip Ember, Frost, or Nova without casting. Aim with the crosshair, then right-click to cast your selected spell.", visual: '<div class="tutorial-icon"><span style="color:#f1743e">●</span> <span style="color:#66cce4">✦</span> <span style="color:#be84f0">✺</span></div>' },
       { title: "Defeat. Descend.", description: "Clear the floor to summon its guardian. Defeat the boss, then step onto the glowing stairs. The dungeon never ends.", visual: '<div class="tutorial-icon">☠ ↓</div>' }
     ],
     mobile: [
@@ -104,7 +103,7 @@
 
   const input = { keys: new Set(), joystickX: 0, joystickY: 0, joystickPointer: null, mobileBlocking: false, mouseX: 0, mouseY: 0, mouseClientX: null, mouseClientY: null, hasMouseAim: false, pointerInside: false, attackPointer: null };
   const world = {
-    width: 960, height: 540, theme: "grass", name: "THE SUNLIT VERGE", obstacles: [], torches: [], enemies: [],
+    width: 960, height: 540, theme: "grass", obstacles: [], torches: [], enemies: [],
     projectiles: [], particles: [], floaters: [], pickups: [], hazards: [], boss: null, bossSpawned: false,
     floorCleared: false, stairs: null, elapsed: 0, rng: Math.random, objective: "", layout: "field"
   };
@@ -250,6 +249,14 @@
       enemy.range *= sizeScale;
       enemy.knockX *= scaleX;
       enemy.knockY *= scaleY;
+      (enemy.chargeTrail || []).forEach((point) => { point.x *= scaleX; point.y *= scaleY; });
+      if (enemy.charge) {
+        enemy.charge.remaining *= sizeScale;
+        enemy.charge.speed *= sizeScale;
+        enemy.attackAngle = Math.atan2(enemy.charge.dy * scaleY, enemy.charge.dx * scaleX);
+        enemy.charge.dx = Math.cos(enemy.attackAngle);
+        enemy.charge.dy = Math.sin(enemy.attackAngle);
+      }
     });
     world.projectiles.forEach((projectile) => {
       projectile.radius *= sizeScale;
@@ -274,7 +281,6 @@
     }
   }
 
-  const floorName = (floor) => floor === 0 ? "THE SUNLIT VERGE" : FLOOR_NAMES[(floor - 1) % FLOOR_NAMES.length];
   const buffStacks = (id) => state.buffs[id] || 0;
   const spellCooldown = (index) => SPELLS[index].cooldown * Math.pow(0.8, buffStacks("quickcast"));
   const seedForFloor = (floor) => (state.runSeed ^ Math.imul(floor + 1, 2654435761)) >>> 0;
@@ -295,13 +301,12 @@
     const difficulty = floor;
     world.rng = mulberry32(seedForFloor(floor));
     world.theme = floor === 0 ? "grass" : floor % 4 === 0 ? "crypt" : floor % 3 === 0 ? "ember" : "stone";
-    world.name = floorName(floor);
     Object.assign(world, { obstacles: [], torches: [], enemies: [], projectiles: [], particles: [], floaters: [], pickups: [], hazards: [], boss: null, bossSpawned: false, floorCleared: false, stairs: null, elapsed: 0, objective: "", layout: floor === 0 ? "field" : ["scattered", "cross", "ring", "lanes", "sanctum"][Math.floor(world.rng() * 5)] });
     ui.bossHud.classList.add("is-hidden");
     Object.assign(player, { x: world.width * 0.5, y: world.height * 0.79, facingX: 0, facingY: -1, attackCooldown: 0, attackAnim: 0, slash: null, spellCooldowns: [0, 0, 0], invulnerable: 0.7, blocking: false, wasBlocking: false, guardBroken: 0, stamina: player.maxStamina, dashCooldown: 0, poisonTimer: 0, poisonTick: 0 });
     createObstacles(floor);
     createTorches(floor);
-    const count = floor === 0 ? 3 : Math.min(10, 3 + Math.ceil(difficulty * 0.58));
+    const count = floor === 0 ? 5 : Math.min(20, 6 + Math.ceil(difficulty * 0.9));
     for (let index = 0; index < count; index += 1) {
       const type = floor === 0 ? "slime" : chooseEnemyType(index, floor);
       const position = findSpawnPosition(index);
@@ -453,38 +458,40 @@
 
   function createEnemy(type, x, y, floor) {
     const unit = state.unit;
-    const hpScale = 1 + floor * 0.14;
+    const hpScale = 1 + floor * 0.16;
     const stats = {
-      slime: { hp: 42, speed: 52, radius: 16, damage: 11, range: 30, cooldown: 1.35 },
-      skeleton: { hp: 58, speed: 66, radius: 14, damage: 15, range: 35, cooldown: 1.15 },
-      wisp: { hp: 38, speed: 48, radius: 12, damage: 13, range: 220, cooldown: 1.75 },
-      spitter: { hp: 48, speed: 44, radius: 15, damage: 9, range: 245, cooldown: 2.2 },
-      charger: { hp: 76, speed: 56, radius: 17, damage: 20, range: 250, cooldown: 2.6 },
-      cultist: { hp: 62, speed: 42, radius: 15, damage: 17, range: 145, cooldown: 2.45 },
-      sentinel: { hp: 88, speed: 34, radius: 18, damage: 21, range: 330, cooldown: 3.1 }
+      slime: { hp: 50, speed: 58, radius: 16, damage: 16, range: 30, cooldown: 1.2 },
+      skeleton: { hp: 68, speed: 74, radius: 14, damage: 22, range: 35, cooldown: 1.05 },
+      wisp: { hp: 46, speed: 54, radius: 12, damage: 19, range: 220, cooldown: 1.6 },
+      spitter: { hp: 58, speed: 50, radius: 15, damage: 15, range: 245, cooldown: 2 },
+      charger: { hp: 92, speed: 64, radius: 17, damage: 29, range: 250, cooldown: 2.3 },
+      cultist: { hp: 74, speed: 48, radius: 15, damage: 25, range: 145, cooldown: 2.2 },
+      sentinel: { hp: 105, speed: 40, radius: 18, damage: 30, range: 330, cooldown: 2.8 }
     }[type];
     return {
       type, x, y, radius: stats.radius * unit, hp: Math.round(stats.hp * hpScale), maxHp: Math.round(stats.hp * hpScale),
-      speed: stats.speed * unit * (1 + Math.min(floor, 50) * 0.006), damage: Math.round(stats.damage * (1 + floor * 0.035)),
+      speed: stats.speed * unit * (1 + Math.min(floor, 50) * 0.006), damage: Math.round(stats.damage * (1 + floor * 0.045)),
       range: stats.range * unit, baseCooldown: stats.cooldown, attackCooldown: 0.35 + world.rng() * 0.7,
       telegraph: 0, telegraphMax: 0, telegraphRadius: 0, telegraphWidth: 0, telegraphLength: 0,
       attackKind: "", attackAngle: 0, flash: 0, frozen: 0, stunned: 0, burnTimer: 0, burnTick: 0, burnDamage: 0,
-      dead: false, deathTimer: 0, hurtVisible: 0, walk: world.rng() * 10, knockX: 0, knockY: 0, isBoss: false
+      dead: false, deathTimer: 0, hurtVisible: 0, walk: world.rng() * 10, knockX: 0, knockY: 0, isBoss: false,
+      charge: null, chargeTrail: []
     };
   }
 
   function createBoss() {
     const floor = state.floor;
     const unit = state.unit;
-    const maxHp = Math.round((floor === 0 ? 185 : 230) * (1 + floor * 0.19));
+    const maxHp = Math.round((floor === 0 ? 300 : 420) * (1 + floor * 0.22));
     const spawn = findClearPoint(world.width * 0.5, Math.max(95 * unit, world.height * 0.2), (floor === 0 ? 30 : 32) * unit);
-    const profile = floor === 0 ? { id: "moss", name: "THE MOSS GUARDIAN", special: "poison", color: "#9db969" } : BOSS_CATALOG[Math.floor(world.rng() * BOSS_CATALOG.length)];
+    const profile = floor === 0 ? { id: "moss", name: "THE MOSS GUARDIAN", special: "poison", pursuit: "charge", color: "#9db969" } : BOSS_CATALOG[Math.floor(world.rng() * BOSS_CATALOG.length)];
     const boss = {
       type: "boss", name: profile.name, x: spawn.x, y: spawn.y,
       radius: (floor === 0 ? 30 : 32) * unit, hp: maxHp, maxHp,
-      speed: (floor === 0 ? 38 : 47) * unit * (1 + Math.min(floor, 40) * 0.005),
-      damage: Math.round((floor === 0 ? 16 : 20) * (1 + floor * 0.03)), range: 75 * unit,
-      baseCooldown: 1.7, attackCooldown: 1.2, specialCooldown: 3.8, telegraph: 0, telegraphMax: 0,
+      speed: (floor === 0 ? 46 : 58) * unit * (1 + Math.min(floor, 40) * 0.005),
+      damage: Math.round((floor === 0 ? 24 : 30) * (1 + floor * 0.04)), range: 75 * unit,
+      baseCooldown: 1.5, attackCooldown: 1.2, specialCooldown: 3.8, pursuitCooldown: floor === 0 ? 2.2 : 1.8,
+      pursuitKind: profile.pursuit, charge: null, chargeTrail: [], telegraph: 0, telegraphMax: 0,
       telegraphRadius: 0, telegraphWidth: 0, telegraphLength: 0, attackKind: "", attackAngle: 0,
       flash: 0, frozen: 0, stunned: 0, burnTimer: 0, burnTick: 0, burnDamage: 0, dead: false, deathTimer: 0,
       hurtVisible: 0, walk: 0, knockX: 0, knockY: 0, isBoss: true,
@@ -501,7 +508,6 @@
   }
 
   function updateFloorLabels() {
-    ui.areaLabel.textContent = world.name;
     ui.floorLabel.textContent = state.floor === 0 ? "TUTORIAL" : `FLOOR ${state.floor}`;
   }
 
@@ -654,7 +660,7 @@
   }
 
   function renderControlsReference() {
-    const desktop = [["Move", "WASD / Arrows"], ["Aim", "Crosshair"], ["Slash", "Space / Tap left click"], ["Charged shot", "Hold left click, release"], ["Guard", "Hold E"], ["Cast selected spell", "Right click"], ["Select & cast", "1 / 2 / 3"], ["Dash", "Left Shift"], ["Pause", "Escape"]];
+    const desktop = [["Move", "WASD / Arrows"], ["Aim", "Crosshair"], ["Slash", "Space / Tap left click"], ["Charged shot", "Hold left click, release"], ["Guard", "Hold E"], ["Cast selected spell", "Right click"], ["Select spell", "1 / 2 / 3"], ["Dash", "Left Shift"], ["Pause", "Escape"]];
     const mobile = [["Move", "Joystick"], ["Strike", "Strike button"], ["Guard", "Hold Guard"], ["Dash", "Dash button"], ["Choose spell", "Spell slots"], ["Cast again", "Spell button"]];
     const controls = state.controlMode === "desktop" ? desktop : mobile;
     ui.controlsSubtitle.textContent = state.controlMode === "desktop" ? "Keyboard & mouse" : "Touch controls";
@@ -823,6 +829,9 @@
       enemy.hurtVisible = Math.max(0, enemy.hurtVisible - dt);
       enemy.attackCooldown = Math.max(0, enemy.attackCooldown - dt);
       if (enemy.specialCooldown !== undefined) enemy.specialCooldown = Math.max(0, enemy.specialCooldown - dt);
+      if (enemy.pursuitCooldown !== undefined) enemy.pursuitCooldown = Math.max(0, enemy.pursuitCooldown - dt);
+      enemy.chargeTrail.forEach((point) => { point.life -= dt; });
+      enemy.chargeTrail = enemy.chargeTrail.filter((point) => point.life > 0);
       if (enemy.dead) { enemy.deathTimer -= dt; return; }
       if (enemy.burnTimer > 0) {
         enemy.burnTimer -= dt;
@@ -836,8 +845,10 @@
         enemy.knockY *= Math.pow(0.015, dt);
         if (Math.hypot(enemy.knockX, enemy.knockY) < 2) enemy.knockX = enemy.knockY = 0;
       }
-      if (enemy.stunned > 0 || enemy.frozen > 0) return;
+      if (enemy.stunned > 0 || enemy.frozen > 0) { enemy.charge = null; return; }
+      if (enemy.charge) { updateEnemyCharge(enemy, dt); return; }
       if (enemy.telegraph > 0) {
+        if (enemy.attackKind === "homing") enemy.attackAngle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
         enemy.telegraph -= dt;
         if (enemy.telegraph <= 0) resolveEnemyAttack(enemy);
         return;
@@ -868,7 +879,10 @@
   }
 
   function updateBoss(boss, dt, dist, nx, ny, slowFactor) {
-    if (boss.specialCooldown <= 0) {
+    if (boss.pursuitCooldown <= 0) {
+      beginEnemyAttack(boss, boss.pursuitKind, boss.pursuitKind === "charge" ? 0.72 : 0.65);
+      boss.pursuitCooldown = Math.max(2.8, 4.6 - Math.min(state.floor, 36) * 0.05);
+    } else if (boss.specialCooldown <= 0) {
       const specialKind = { beam: "beam", aoe: "aoe", poison: "poisonBurst", charge: "charge", volley: "burst", storm: world.rng() < 0.5 ? "storm" : "beam" }[boss.special] || "burst";
       beginEnemyAttack(boss, specialKind, specialKind === "beam" ? 1.25 : specialKind === "charge" ? 0.95 : 1.05);
       boss.specialCooldown = Math.max(3.2, 5.7 - Math.min(state.floor, 25) * 0.05);
@@ -885,12 +899,54 @@
     enemy.attackAngle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
     enemy.telegraphRadius = kind === "aoe" || kind === "storm" ? (enemy.isBoss ? 132 : 92) * state.unit : kind === "poisonBurst" ? 118 * state.unit : kind === "slam" ? enemy.range + 25 * state.unit : enemy.range + 14 * state.unit;
     enemy.telegraphWidth = (kind === "beam" ? (enemy.isBoss ? 68 : 42) : kind === "charge" ? enemy.radius * 1.8 / state.unit : 24) * state.unit;
-    enemy.telegraphLength = (kind === "beam" ? (enemy.isBoss ? 520 : 390) : kind === "charge" ? (enemy.isBoss ? 350 : 270) : kind === "shot" || kind === "poisonShot" ? 360 : 0) * state.unit;
+    enemy.telegraphLength = (kind === "beam" ? (enemy.isBoss ? 520 : 390) : kind === "charge" ? (enemy.isBoss ? 460 : 300) : kind === "shot" || kind === "poisonShot" ? 360 : 0) * state.unit;
+  }
+
+  function updateEnemyCharge(enemy, dt) {
+    if (dt <= 0) return;
+    const charge = enemy.charge;
+    const travel = Math.min(charge.remaining, charge.speed * dt);
+    // Small swept steps keep a fast charge from skipping walls or the player's body.
+    const steps = Math.max(1, Math.ceil(travel / (4 * state.unit)));
+    let blocked = false;
+    for (let step = 0; step < steps; step += 1) {
+      const x = enemy.x, y = enemy.y;
+      const dx = charge.dx * travel / steps, dy = charge.dy * travel / steps;
+      moveEntity(enemy, dx, dy, enemy.radius);
+      const moved = Math.hypot(enemy.x - x, enemy.y - y);
+      charge.remaining = Math.max(0, charge.remaining - moved);
+      if (!charge.hitPlayer && pointToSegmentDistance(player.x, player.y, x, y, enemy.x, enemy.y) <= enemy.radius + player.radius * state.unit) {
+        charge.hitPlayer = true;
+        damagePlayer(enemy.damage, enemy);
+      }
+      if (moved < Math.hypot(dx, dy) - 0.01 || enemy.stunned > 0 || enemy.frozen > 0) { blocked = true; break; }
+    }
+    enemy.walk += dt * 30;
+    charge.trailTimer -= dt;
+    if (charge.trailTimer <= 0) {
+      charge.trailTimer = 0.025;
+      enemy.chargeTrail.push({ x: enemy.x, y: enemy.y, life: 0.18 });
+      addParticle(enemy.x - charge.dx * enemy.radius, enemy.y - charge.dy * enemy.radius, -charge.dx * 55 * state.unit, -charge.dy * 55 * state.unit, "#c7a27e", 0.25, 3 * state.unit);
+    }
+    if (blocked || charge.remaining <= 0.01) {
+      enemy.charge = null;
+      burst(enemy.x, enemy.y, "#c7a27e", 8, 70 * state.unit);
+    }
   }
 
   function resolveEnemyAttack(enemy) {
     enemy.attackCooldown = enemy.baseCooldown * (0.9 + world.rng() * 0.28);
     const unit = state.unit;
+    if (enemy.attackKind === "homing") {
+      const speed = 245 * unit;
+      spawnProjectile(enemy.x, enemy.y, Math.cos(enemy.attackAngle), Math.sin(enemy.attackAngle), {
+        friendly: false, damage: enemy.damage, speed, radius: 9 * unit,
+        color: enemy.specialColor, life: Math.hypot(world.width, world.height) / speed + 0.5,
+        type: "homing", turnRate: 2.4, homingTime: 3
+      });
+      burst(enemy.x, enemy.y, enemy.specialColor, 10, 75 * unit);
+      return;
+    }
     if (enemy.attackKind === "shot" || enemy.attackKind === "poisonShot") {
       const poison = enemy.attackKind === "poisonShot";
       spawnProjectile(enemy.x, enemy.y, Math.cos(enemy.attackAngle), Math.sin(enemy.attackAngle), { friendly: false, damage: enemy.damage, speed: (poison ? 165 : 190) * unit, radius: (poison ? 8 : 6) * unit, color: poison ? "#9bc657" : "#79d6e5", life: 3.1, type: poison ? "poison" : "enemy" });
@@ -916,13 +972,11 @@
       return;
     }
     if (enemy.attackKind === "charge") {
-      const startX = enemy.x;
-      const startY = enemy.y;
-      const stepX = Math.cos(enemy.attackAngle) * enemy.telegraphLength / 12;
-      const stepY = Math.sin(enemy.attackAngle) * enemy.telegraphLength / 12;
-      for (let step = 0; step < 12; step += 1) moveEntity(enemy, stepX, stepY, enemy.radius);
-      if (pointToSegmentDistance(player.x, player.y, startX, startY, enemy.x, enemy.y) <= enemy.radius + player.radius * unit) damagePlayer(enemy.damage, enemy);
-      burst(enemy.x, enemy.y, "#d88168", 14, 125 * unit);
+      enemy.knockX = enemy.knockY = 0;
+      enemy.charge = {
+        dx: Math.cos(enemy.attackAngle), dy: Math.sin(enemy.attackAngle), remaining: enemy.telegraphLength,
+        speed: (enemy.isBoss ? 920 : 760) * unit, hitPlayer: false, trailTimer: 0
+      };
       return;
     }
     if (["aoe", "poisonBurst", "storm"].includes(enemy.attackKind)) {
@@ -953,6 +1007,16 @@
     world.projectiles.forEach((projectile) => {
       if (projectile.life <= 0) return;
       projectile.life -= dt;
+      if (projectile.homingTime > 0) {
+        const heading = Math.atan2(projectile.vy, projectile.vx);
+        const desired = Math.atan2(player.y - projectile.y, player.x - projectile.x);
+        const difference = Math.atan2(Math.sin(desired - heading), Math.cos(desired - heading));
+        const angle = heading + clamp(difference, -projectile.turnRate * dt, projectile.turnRate * dt);
+        const speed = Math.hypot(projectile.vx, projectile.vy);
+        projectile.vx = Math.cos(angle) * speed;
+        projectile.vy = Math.sin(angle) * speed;
+        projectile.homingTime = Math.max(0, projectile.homingTime - dt);
+      }
       const travel = projectile.type === "nova"
         ? Math.min(1, Math.hypot(projectile.targetX - projectile.x, projectile.targetY - projectile.y) / Math.max(0.001, Math.hypot(projectile.vx, projectile.vy) * dt)) : 1;
       projectile.x += projectile.vx * dt * travel;
@@ -1038,8 +1102,8 @@
       pickup.life -= dt;
       pickup.phase += dt * 4;
       if (distance(player, pickup) < 25 * state.unit) {
-        if (pickup.type === "health") { player.hp = Math.min(player.maxHp, player.hp + 18); showFloater(pickup.x, pickup.y - 12, "+18 HP", "#79c979"); }
-        else { player.mana = Math.min(player.maxMana, player.mana + 27); showFloater(pickup.x, pickup.y - 12, "+27 MANA", "#67c8e3"); }
+        if (pickup.type === "health") { player.hp = Math.min(player.maxHp, player.hp + 10); showFloater(pickup.x, pickup.y - 12, "+10 HP", "#79c979"); }
+        else { player.mana = Math.min(player.maxMana, player.mana + 22); showFloater(pickup.x, pickup.y - 12, "+22 MANA", "#67c8e3"); }
         pickup.life = 0;
         burst(pickup.x, pickup.y, pickup.type === "health" ? "#79c979" : "#67c8e3", 8, 65 * state.unit);
       }
@@ -1176,17 +1240,21 @@
         damageEnemy(enemy, projectile.damage, (dx / length) * 430 * state.unit, (dy / length) * 430 * state.unit, "nova");
       }
     });
-    createHazard(projectile.x, projectile.y, projectile.blastRadius, "nova", 0.35);
-    for (let index = 0; index < 28; index += 1) {
-      const angle = Math.PI * 2 * index / 28;
-      addParticle(projectile.x + Math.cos(angle) * 20 * state.unit, projectile.y + Math.sin(angle) * 20 * state.unit, Math.cos(angle) * 190 * state.unit, Math.sin(angle) * 190 * state.unit, projectile.color, 0.55, 4 * state.unit);
+    const radius = projectile.blastRadius;
+    createHazard(projectile.x, projectile.y, radius, "nova", 0.6);
+    for (let index = 0; index < 32; index += 1) {
+      const angle = Math.PI * 2 * index / 32;
+      const nx = Math.cos(angle), ny = Math.sin(angle);
+      // Edge sparks and the inner wave scale from the same radius used for damage.
+      addParticle(projectile.x + nx * radius, projectile.y + ny * radius, -nx * radius * 0.18, -ny * radius * 0.18, projectile.color, 0.6, 4 * state.unit);
+      addParticle(projectile.x + nx * radius * 0.2, projectile.y + ny * radius * 0.2, nx * radius * 2.4, ny * radius * 2.4, "#e5c2ff", 0.6, 3 * state.unit);
     }
     state.shakeAmount = state.screenShake ? 7 * state.unit : 0;
   }
 
   function spawnProjectile(x, y, dx, dy, options) {
     const length = Math.max(0.001, Math.hypot(dx, dy));
-    world.projectiles.push({ x, y, vx: (dx / length) * options.speed, vy: (dy / length) * options.speed, friendly: options.friendly, damage: options.damage, radius: options.radius, color: options.color, life: options.life, type: options.type, pierce: options.pierce ?? 0, hit: new Set(), pulse: 0, detonated: false, targetX: options.targetX, targetY: options.targetY, blastRadius: options.blastRadius });
+    world.projectiles.push({ x, y, vx: (dx / length) * options.speed, vy: (dy / length) * options.speed, friendly: options.friendly, damage: options.damage, radius: options.radius, color: options.color, life: options.life, type: options.type, pierce: options.pierce ?? 0, hit: new Set(), pulse: 0, detonated: false, targetX: options.targetX, targetY: options.targetY, blastRadius: options.blastRadius, turnRate: options.turnRate || 0, homingTime: options.homingTime || 0 });
   }
 
   function requestDash() {
@@ -1226,6 +1294,9 @@
   function killEnemy(enemy) {
     if (enemy.dead) return;
     enemy.dead = true;
+    enemy.telegraph = 0;
+    enemy.charge = null;
+    enemy.chargeTrail = [];
     enemy.deathTimer = enemy.isBoss ? 0.9 : 0.32;
     state.kills += 1;
     burst(enemy.x, enemy.y, enemy.isBoss ? "#e15f71" : "#b8a88a", enemy.isBoss ? 36 : 14, (enemy.isBoss ? 190 : 105) * state.unit);
@@ -1235,12 +1306,12 @@
       const stairPosition = findClearPoint(world.width * 0.5, Math.max(68 * state.unit, world.height * 0.14), stairClearance());
       world.stairs = { x: stairPosition.x, y: stairPosition.y, phase: 0 };
       ui.bossHud.classList.add("is-hidden");
-      player.hp = Math.min(player.maxHp, player.hp + 28);
+      player.hp = Math.min(player.maxHp, player.hp + 14);
       player.mana = player.maxMana;
       state.shakeAmount = state.screenShake ? 15 * state.unit : 0;
       showToast("GUARDIAN DEFEATED · FIND THE STAIRS");
       updateObjective();
-    } else if (world.rng() < 0.24) world.pickups.push({ x: enemy.x, y: enemy.y, type: world.rng() < 0.48 ? "health" : "mana", life: 12, phase: 0 });
+    } else if (world.rng() < 0.18) world.pickups.push({ x: enemy.x, y: enemy.y, type: world.rng() < 0.48 ? "health" : "mana", life: 12, phase: 0 });
   }
 
   function damagePlayer(amount, attacker, bypassBlock = false) {
@@ -1291,13 +1362,12 @@
     state.scene = "transition";
     const nextFloor = state.floor + 1;
     ui.transitionFloor.textContent = `FLOOR ${nextFloor}`;
-    ui.transitionName.textContent = floorName(nextFloor);
     ui.floorTransition.classList.remove("is-hidden");
     clearTimeout(state.transitionTimer);
     state.transitionTimer = setTimeout(() => {
       state.floor = Number.isSafeInteger(nextFloor) ? nextFloor : state.floor;
       player.maxHp = Math.min(220, player.maxHp + 3);
-      player.hp = Math.min(player.maxHp, player.hp + 34);
+      player.hp = Math.min(player.maxHp, player.hp + 20);
       player.maxMana = Math.min(140, player.maxMana + 1);
       player.mana = player.maxMana;
       player.power = 1 + state.floor * 0.045;
@@ -1509,13 +1579,31 @@
   function drawEnemy(enemy, time) {
     if (enemy.dead && enemy.deathTimer <= 0) return;
     const unit = state.unit;
-    const deathScale = enemy.dead ? clamp(enemy.deathTimer / (enemy.isBoss ? 0.9 : 0.32), 0, 1) : 1;
-    if (enemy.telegraph > 0) drawAttackTelegraph(enemy, time);
-    ctx.save(); ctx.translate(Math.round(enemy.x), Math.round(enemy.y + Math.sin(time * 0.004 + enemy.walk) * 2 * unit)); ctx.scale(deathScale, deathScale); ctx.globalAlpha = enemy.dead ? deathScale : 1;
-    ctx.fillStyle = "rgba(0,0,0,.3)"; ctx.fillRect(-enemy.radius, enemy.radius * 0.68, enemy.radius * 2, 8 * unit);
     const spriteId = enemy.isBoss ? enemy.variant : enemy.type;
     const height = (enemy.isBoss ? 86 : { slime: 30, skeleton: 48, wisp: 46, spitter: 38, charger: 42, cultist: 50, sentinel: 54 }[enemy.type]) * unit;
-    drawActorSprite(spriteId, height, !enemy.isBoss && player.x > enemy.x, enemy.flash > 0);
+    const nativeRight = enemy.type === "charger" || enemy.type === "spitter";
+    const lookingRight = enemy.charge ? enemy.charge.dx >= 0 : player.x > enemy.x;
+    const flipped = enemy.isBoss && !enemy.charge ? false : lookingRight !== nativeRight;
+    const deathScale = enemy.dead ? clamp(enemy.deathTimer / (enemy.isBoss ? 0.9 : 0.32), 0, 1) : 1;
+    if (enemy.telegraph > 0) drawAttackTelegraph(enemy, time);
+    enemy.chargeTrail.forEach((point) => {
+      ctx.save(); ctx.translate(point.x, point.y);
+      ctx.globalAlpha = point.life / 0.18 * 0.3;
+      drawActorSprite(spriteId, height, flipped);
+      ctx.restore();
+    });
+    ctx.save(); ctx.translate(Math.round(enemy.x), Math.round(enemy.y + Math.sin(time * 0.004 + enemy.walk) * 2 * unit)); ctx.scale(deathScale, deathScale); ctx.globalAlpha = enemy.dead ? deathScale : 1;
+    ctx.fillStyle = "rgba(0,0,0,.3)"; ctx.fillRect(-enemy.radius, enemy.radius * 0.68, enemy.radius * 2, 8 * unit);
+    if (enemy.charge) {
+      ctx.save(); ctx.rotate(enemy.attackAngle);
+      ctx.strokeStyle = enemy.specialColor || "#e4b38b"; ctx.lineWidth = 2 * unit;
+      for (const offset of [-10, 0, 10]) {
+        ctx.beginPath(); ctx.moveTo(-enemy.radius - 5 * unit, offset * unit);
+        ctx.lineTo(-enemy.radius - 32 * unit, offset * unit); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    drawActorSprite(spriteId, height, flipped, enemy.flash > 0);
     if (enemy.frozen > 0) { ctx.strokeStyle = "#9ce8f4"; ctx.lineWidth = 3 * unit; ctx.strokeRect(-enemy.radius - 4 * unit, -enemy.radius - 9 * unit, enemy.radius * 2 + 8 * unit, enemy.radius * 2 + 13 * unit); }
     if (enemy.burnTimer > 0) { ctx.fillStyle = Math.floor(time / 80) % 2 ? "#ffb34e" : "#f0623e"; ctx.fillRect(-6 * unit, -enemy.radius - 13 * unit, 6 * unit, 10 * unit); ctx.fillRect(3 * unit, -enemy.radius - 8 * unit, 5 * unit, 7 * unit); }
     ctx.restore();
@@ -1531,6 +1619,14 @@
     ctx.fillStyle = `rgba(244,65,65,${flash * 0.55})`;
     ctx.strokeStyle = `rgba(255,122,105,${Math.min(1, flash + 0.25)})`;
     ctx.lineWidth = Math.max(2, (2 + progress * 2) * state.unit);
+    if (enemy.attackKind === "homing") {
+      ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 8 * state.unit, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(player.x, player.y, (player.radius + 12) * state.unit, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([5 * state.unit, 5 * state.unit]);
+      ctx.beginPath(); ctx.moveTo(enemy.x, enemy.y); ctx.lineTo(player.x, player.y); ctx.stroke();
+      ctx.restore();
+      return;
+    }
     if (directional) {
       ctx.translate(enemy.x, enemy.y);
       ctx.rotate(enemy.attackAngle);
@@ -1567,6 +1663,16 @@
   function drawProjectiles() {
     world.projectiles.forEach((projectile) => {
       if (projectile.life <= 0) return;
+      if (projectile.type === "homing") {
+        ctx.save(); ctx.translate(projectile.x, projectile.y); ctx.rotate(Math.atan2(projectile.vy, projectile.vx));
+        ctx.strokeStyle = `${projectile.color}88`; ctx.lineWidth = projectile.radius;
+        ctx.beginPath(); ctx.moveTo(-projectile.radius * 4, 0); ctx.lineTo(0, 0); ctx.stroke();
+        ctx.shadowColor = projectile.color; ctx.shadowBlur = 14 * state.unit;
+        ctx.fillStyle = projectile.color; ctx.beginPath(); ctx.arc(0, 0, projectile.radius, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0; ctx.fillStyle = "#fff1e6";
+        ctx.beginPath(); ctx.arc(0, 0, projectile.radius * 0.42, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        return;
+      }
       const pulse = 1 + Math.sin(projectile.pulse) * 0.16;
       ctx.fillStyle = `${projectile.color}33`; ctx.fillRect(projectile.x - projectile.radius * 2, projectile.y - projectile.radius * 2, projectile.radius * 4, projectile.radius * 4);
       ctx.fillStyle = projectile.color; ctx.fillRect(projectile.x - projectile.radius * pulse, projectile.y - projectile.radius * pulse, projectile.radius * 2 * pulse, projectile.radius * 2 * pulse);
@@ -1594,8 +1700,13 @@
         ctx.globalAlpha = clamp(hazard.life / hazard.maxLife, 0, 1);
         ctx.fillStyle = "rgba(190,132,240,.18)";
         ctx.strokeStyle = "#d7a3ff";
-        ctx.lineWidth = 3 * state.unit;
+        ctx.lineWidth = 4 * state.unit;
+        ctx.shadowColor = "#be84f0"; ctx.shadowBlur = 12 * state.unit;
         ctx.beginPath(); ctx.arc(hazard.x, hazard.y, hazard.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.shadowBlur = 0;
+        const progress = clamp((hazard.maxLife - hazard.life) / 0.18, 0, 1);
+        ctx.strokeStyle = "#f2dbff";
+        ctx.beginPath(); ctx.arc(hazard.x, hazard.y, hazard.radius * progress, 0, Math.PI * 2); ctx.stroke();
         ctx.restore();
         return;
       }
@@ -1730,7 +1841,7 @@
     ui.replayTutorial.addEventListener("click", () => { const origin = state.settingsOrigin; ui.settings.classList.add("is-hidden"); if (origin === "menu") startGame(); else showTutorial(0); });
     $$(".control-option").forEach((button) => button.addEventListener("click", () => setControlMode(button.dataset.mode)));
     ui.shakeToggle.addEventListener("click", () => { state.screenShake = !state.screenShake; savePreference("screenShake", state.screenShake); ui.shakeToggle.classList.toggle("active", state.screenShake); ui.shakeToggle.setAttribute("aria-checked", String(state.screenShake)); });
-    $$(".spell-slot").forEach((slot, index) => slot.addEventListener("click", () => { state.selectedSpell = index; updateSpellSelection(); castSpell(index); }));
+    $$(".spell-slot").forEach((slot, index) => slot.addEventListener("click", () => { state.selectedSpell = index; updateSpellSelection(); if (state.controlMode === "mobile") castSpell(index); }));
 
     window.addEventListener("keydown", (event) => {
       if (trapModalFocus(event)) return;
@@ -1753,7 +1864,7 @@
       if (event.code === "KeyE") cancelCharge();
       if (event.repeat) return;
       if (event.code === "ShiftLeft") { event.preventDefault(); requestDash(); return; }
-      if (["Digit1", "Digit2", "Digit3", "Numpad1", "Numpad2", "Numpad3"].includes(event.code)) { const index = Number(event.code.slice(-1)) - 1; state.selectedSpell = index; castSpell(index); }
+      if (["Digit1", "Digit2", "Digit3", "Numpad1", "Numpad2", "Numpad3"].includes(event.code)) { event.preventDefault(); state.selectedSpell = Number(event.code.slice(-1)) - 1; updateSpellSelection(); }
     });
     window.addEventListener("keyup", (event) => input.keys.delete(event.code));
     window.addEventListener("blur", clearInput);

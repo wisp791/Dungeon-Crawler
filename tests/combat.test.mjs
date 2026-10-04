@@ -67,7 +67,9 @@ function game() {
     detonateNova, BOSS_CATALOG, chooseEnemyType, sprites, SPRITE_FILES, opaqueBounds,
     drawObstacles, drawStairs, drawEnemy, drawProjectiles, stairBounds, stairClearance,
     collidesWithObstacle, circleIntersectsRect, findClearPoint, applyBuff, expireChamberBuff,
-    showBuffChoices, BUFF_CATALOG, damagePlayer, descendFloor, scaleWorld
+    showBuffChoices, BUFF_CATALOG, damagePlayer, descendFloor, scaleWorld, updateEnemies,
+    updateBoss, beginEnemyAttack, resolveEnemyAttack, updateEnemyCharge, updatePickups,
+    killEnemy, drawHazards, spawnProjectile
   };`);
   vm.runInNewContext(instrumented, sandbox);
   const api = sandbox.game;
@@ -405,7 +407,7 @@ test("each blessing expires on descent before normal floor progression", () => {
     api.finishDescent();
     assert.equal(api.state.floor, 2);
     assert.equal(api.player.maxHp, 103);
-    assert.equal(api.player.hp, 94);
+    assert.equal(api.player.hp, 80);
     assert.equal(api.state.scene, "buff");
     assert.equal(api.state.buffChoices.length, 3);
     assert.equal(new Set(api.state.buffChoices).size, 3);
@@ -558,4 +560,193 @@ test("new wall proportions keep enemies, bosses and stairs reachable across rand
       }
     }
   }
+});
+
+test("number keys equip spells without spending mana or firing, then right-click casts", () => {
+  const api = game();
+  for (const code of ["Digit2", "Digit3", "Digit1", "Numpad3", "Numpad2", "Numpad1"]) {
+    const index = Number(code.slice(-1)) - 1;
+    api.window.dispatch("keydown", { code, repeat: false });
+    assert.equal(api.state.selectedSpell, index);
+    assert.equal(api.element(`slot${index}`).classList.contains("selected"), true);
+    assert.equal(api.player.mana, 100);
+    assert.deepEqual(Array.from(api.player.spellCooldowns), [0, 0, 0]);
+    assert.equal(api.world.projectiles.length, 0);
+  }
+  api.element("slot2").dispatch("click");
+  assert.equal(api.state.selectedSpell, 2);
+  assert.equal(api.world.projectiles.length, 0);
+  api.pointer("pointerdown", 700, 270, 2);
+  assert.equal(api.world.projectiles[0].type, "nova");
+  assert.equal(api.player.mana, 65);
+});
+
+test("mobile spell slots retain tap-to-cast", () => {
+  const api = game();
+  api.state.controlMode = "mobile";
+  api.element("slot1").dispatch("click");
+  assert.equal(api.state.selectedSpell, 1);
+  assert.equal(api.world.projectiles[0].type, "frost");
+});
+
+test("every boss begins a recurring charge or homing attack against a distant player", () => {
+  for (let profile = -1; profile < 6; profile++) {
+    const api = game();
+    api.state.floor = profile === -1 ? 0 : 5;
+    api.world.rng = () => (profile + 0.5) / 6;
+    api.createBoss();
+    const boss = api.world.boss;
+    boss.x = 200; boss.y = 270;
+    api.player.x = 630; api.player.y = 270;
+    boss.pursuitCooldown = 0;
+    boss.specialCooldown = 100;
+    api.updateEnemies(1 / 60);
+    assert.ok(["charge", "homing"].includes(boss.attackKind));
+    assert.equal(boss.attackKind, boss.pursuitKind);
+    assert.ok(boss.telegraph > 0 && boss.pursuitCooldown > 0);
+    api.updateEnemies(boss.telegraph + 0.001);
+    assert.equal(boss.x, 200); // Resolving a windup must not teleport a charge.
+    if (boss.pursuitKind === "charge") assert.ok(boss.charge);
+    else assert.equal(api.world.projectiles[0].type, "homing");
+    for (let frame = 0; frame < 180 && api.player.hp === 100; frame++) {
+      api.updateEnemies(1 / 60);
+      api.updateProjectiles(1 / 60);
+    }
+    assert.ok(api.player.hp < 100, `${boss.variant} must threaten a stationary ranged player`);
+  }
+});
+
+test("charges advance over multiple frames with trails and swept player contact", () => {
+  for (const unit of [0.7, 1, 1.65]) {
+    const api = game();
+    api.state.unit = unit;
+    api.player.x = 420; api.player.y = 270;
+    const charger = api.createEnemy("charger", 200, 270, 0);
+    api.world.enemies = [charger];
+    api.beginEnemyAttack(charger, "charge", 0.1);
+    api.updateEnemies(0.11);
+    assert.equal(charger.x, 200);
+    assert.equal(api.player.hp, 100);
+    api.updateEnemies(1 / 60);
+    close(charger.x, 200 + 760 * unit / 60);
+    assert.ok(charger.chargeTrail.length > 0);
+    api.drawEnemy(charger, 0);
+    assert.ok(api.drawing.some((call) => call.method === "lineTo"));
+    for (let frame = 0; frame < 60 && charger.charge; frame++) {
+      api.player.invulnerable = 0; // A single charge should still damage only once.
+      api.updateEnemies(1 / 60);
+    }
+    assert.equal(charger.charge, null);
+    assert.equal(api.player.hp, 100 - charger.damage);
+    close(charger.x, 200 + 300 * unit);
+  }
+});
+
+test("fast charges stop at walls and cannot damage through them", () => {
+  const api = game();
+  api.player.x = 440; api.player.y = 270;
+  const charger = api.createEnemy("charger", 200, 270, 0);
+  api.world.enemies = [charger];
+  api.world.obstacles = [{ x: 350, y: 200, w: 32, h: 140 }];
+  api.beginEnemyAttack(charger, "charge", 0.1);
+  api.updateEnemies(0.11);
+  api.updateEnemyCharge(charger, 0.5);
+  assert.equal(charger.charge, null);
+  assert.ok(charger.x + charger.radius <= 350);
+  assert.equal(api.player.hp, 100);
+  assert.equal(api.collidesWithObstacle(charger.x, charger.y, charger.radius), false);
+});
+
+test("freeze, stun and death interrupt an active charge", () => {
+  for (const interrupt of [
+    (enemy) => { enemy.frozen = 3; },
+    (enemy) => { enemy.stunned = 1; },
+    (enemy, api) => api.killEnemy(enemy)
+  ]) {
+    const api = game();
+    const charger = api.createEnemy("charger", 200, 270, 0);
+    api.world.enemies = [charger];
+    api.beginEnemyAttack(charger, "charge", 0.1);
+    api.updateEnemies(0.11);
+    interrupt(charger, api);
+    api.updateEnemies(1 / 60);
+    assert.equal(charger.charge, null);
+    assert.equal(charger.x, 200);
+  }
+});
+
+test("homing shots steer toward a moving player with a bounded turn rate", () => {
+  const api = game();
+  api.spawnProjectile(200, 270, 1, 0, { friendly: false, damage: 30, speed: 245, radius: 9, color: "#e4714d", life: 4, type: "homing", turnRate: 2.4, homingTime: 3 });
+  const shot = api.world.projectiles[0];
+  api.player.x = 450; api.player.y = 470;
+  api.updateProjectiles(0.05);
+  close(Math.atan2(shot.vy, shot.vx), 2.4 * 0.05);
+  close(Math.hypot(shot.vx, shot.vy), 245);
+  api.player.y = 70;
+  api.updateProjectiles(0.05);
+  assert.ok(Math.atan2(shot.vy, shot.vx) < 0.12);
+  api.world.obstacles = [{ x: shot.x + 4, y: shot.y - 40, w: 32, h: 80 }];
+  api.updateProjectiles(0.05);
+  assert.equal(shot.life, 0);
+});
+
+test("Nova boundary, wave and sparks all use its actual damage radius with Expanding Star", () => {
+  for (const expanded of [false, true]) {
+    const api = game();
+    if (expanded) api.chooseBuff("nova_range");
+    const radius = expanded ? 140 : 112;
+    const edge = api.createEnemy("sentinel", 700 + radius + 18 - 0.1, 270, 0);
+    const outside = api.createEnemy("sentinel", 700 + radius + 18 + 0.1, 270, 0);
+    api.world.enemies = [edge, outside];
+    const nova = { x: 700, y: 270, blastRadius: radius, damage: 38, color: "#be84f0", life: 1 };
+    api.detonateNova(nova);
+    assert.equal(edge.hp, edge.maxHp - 38);
+    assert.equal(outside.hp, outside.maxHp);
+    const sparks = api.world.particles.filter((particle) => particle.color === nova.color);
+    assert.equal(sparks.length, 32);
+    for (const spark of sparks) close(Math.hypot(spark.x - 700, spark.y - 270), radius);
+    api.drawHazards(0);
+    assert.equal(api.drawing.find((call) => call.method === "arc").args[2], radius);
+    api.drawing.length = 0;
+    api.updateHazards(0.09);
+    api.drawHazards(90);
+    const arcs = api.drawing.filter((call) => call.method === "arc");
+    close(arcs[0].args[2], radius);
+    close(arcs[1].args[2], radius * 0.5);
+    assert.equal(edge.hp, edge.maxHp - 38); // The visual does not deal damage repeatedly.
+  }
+});
+
+test("enemy populations and damage increase while health drops heal less", () => {
+  const api = game();
+  for (const [floor, count] of [[0, 5], [1, 7], [5, 11], [20, 20]]) {
+    api.state.floor = floor;
+    api.generateFloor(floor);
+    assert.equal(api.world.enemies.length, count);
+  }
+  const previousDamage = { slime: 11, skeleton: 15, wisp: 13, spitter: 9, charger: 20, cultist: 17, sentinel: 21 };
+  for (const [type, damage] of Object.entries(previousDamage)) assert.ok(api.createEnemy(type, 100, 100, 0).damage > damage);
+  api.state.floor = 0;
+  api.createBoss();
+  assert.equal(api.world.boss.maxHp, 300);
+  api.state.floor = 1;
+  api.createBoss();
+  assert.equal(api.world.boss.maxHp, 512);
+  api.player.hp = 40;
+  api.world.pickups = [{ x: api.player.x, y: api.player.y, type: "health", life: 12, phase: 0 }];
+  api.updatePickups(1 / 60);
+  assert.equal(api.player.hp, 50);
+  api.world.rng = () => 0.2; // Previously this would drop loot, now it does not.
+  api.world.pickups = [];
+  api.killEnemy(api.createEnemy("slime", 100, 100, 0));
+  assert.equal(api.world.pickups.length, 0);
+});
+
+test("Freezing Cold keeps its frost bonus, and chamber names are removed", () => {
+  const api = game();
+  assert.equal(api.BUFF_CATALOG.find((buff) => buff.id === "frost_range").name, "Freezing Cold");
+  assert.equal(source.includes("FLOOR_NAMES"), false);
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  assert.equal(/areaLabel|transitionName|VIOLET CRYPT|ECHOING DEEP|SUNLIT VERGE/.test(html), false);
 });

@@ -146,8 +146,7 @@ body.mobile-mode .desktop-hint {
 
 .eyebrow,
 .modal-kicker,
-.objective-kicker,
-.area-label {
+.objective-kicker {
   color: var(--gold);
   font-size: 11px;
   font-weight: 700;
@@ -407,8 +406,7 @@ h1 {
   flex-direction: column;
 }
 
-.area-label { color: #e2d7c1; font-size: 9px; }
-.floor-label { margin-top: 3px; color: var(--gold); font-size: 16px; letter-spacing: .22em; }
+.floor-label { color: var(--gold); font-size: 16px; letter-spacing: .22em; }
 
 .hud-top-right {
   top: max(18px, env(safe-area-inset-top));
@@ -812,7 +810,6 @@ kbd {
 }
 .floor-transition span { color: #8c8377; font-size: 10px; letter-spacing: .28em; }
 .floor-transition strong { margin: 7px 0; color: var(--paper); font-size: clamp(36px, 8vw, 72px); letter-spacing: -.05em; }
-.floor-transition small { color: var(--gold); font-size: 10px; letter-spacing: .2em; }
 
 @keyframes ember-rise {
   0% { transform: translateY(10vh) translateX(0); opacity: 0; }
@@ -837,8 +834,7 @@ kbd {
   .portrait { width: 38px; height: 38px; }
   .bar { width: 29vw; max-width: 145px; }
   .bar-text { display: none; }
-  .floor-banner { top: 13px; }
-  .area-label { font-size: 7px; }
+  .floor-banner { top: 42px; }
   .floor-label { font-size: 11px; }
   .hud-top-right { top: 11px; right: 11px; }
   .enemy-counter { display: none; }
