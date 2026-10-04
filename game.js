@@ -935,8 +935,8 @@
       const speed = 245 * unit;
       spawnProjectile(enemy.x, enemy.y, Math.cos(enemy.attackAngle), Math.sin(enemy.attackAngle), {
         friendly: false, damage: enemy.damage, speed, radius: 9 * unit,
-        color: enemy.specialColor, life: Math.hypot(world.width, world.height) / speed + 0.5,
-        type: "homing", turnRate: 2.4, homingTime: 3
+        color: enemy.specialColor, life: 1,
+        type: "homing", turnRate: 2.4, homingTime: 1
       });
       burst(enemy.x, enemy.y, enemy.specialColor, 10, 75 * unit);
       return;
@@ -1001,6 +1001,10 @@
     world.projectiles.forEach((projectile) => {
       if (projectile.life <= 0) return;
       projectile.life -= dt;
+      if (projectile.type === "homing" && projectile.life <= 0) {
+        projectile.life = 0;
+        return;
+      }
       if (projectile.homingTime > 0) {
         const heading = Math.atan2(projectile.vy, projectile.vx);
         const desired = Math.atan2(player.y - projectile.y, player.x - projectile.x);

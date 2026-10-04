@@ -735,7 +735,7 @@ test("every boss begins a recurring charge or homing attack against a distant pl
     api.createBoss();
     const boss = api.world.boss;
     boss.x = 200; boss.y = 270;
-    api.player.x = 630; api.player.y = 270;
+    api.player.x = boss.pursuitKind === "homing" ? 400 : 630; api.player.y = 270;
     boss.pursuitCooldown = 0;
     boss.specialCooldown = 100;
     api.updateEnemies(1 / 60);
@@ -815,7 +815,7 @@ test("freeze, stun and death interrupt an active charge", () => {
 
 test("homing shots steer toward a moving player with a bounded turn rate", () => {
   const api = game();
-  api.spawnProjectile(200, 270, 1, 0, { friendly: false, damage: 30, speed: 245, radius: 9, color: "#e4714d", life: 4, type: "homing", turnRate: 2.4, homingTime: 3 });
+  api.spawnProjectile(200, 270, 1, 0, { friendly: false, damage: 30, speed: 245, radius: 9, color: "#e4714d", life: 1, type: "homing", turnRate: 2.4, homingTime: 1 });
   const shot = api.world.projectiles[0];
   api.player.x = 450; api.player.y = 470;
   api.updateProjectiles(0.05);
@@ -827,6 +827,40 @@ test("homing shots steer toward a moving player with a bounded turn rate", () =>
   api.world.obstacles = [{ x: shot.x + 4, y: shot.y - 40, w: 32, h: 80 }];
   api.updateProjectiles(0.05);
   assert.equal(shot.life, 0);
+});
+
+test("every boss's homing projectiles expire after one second and cannot hit afterward", () => {
+  for (const unit of [0.7, 1, 1.65]) for (const [index, profile] of game().BOSS_CATALOG.entries()) {
+    if (profile.pursuit !== "homing") continue;
+    const api = game();
+    api.state.unit = unit;
+    api.state.floor = 1;
+    api.world.width = 2000;
+    api.world.rng = () => (index + 0.5) / api.BOSS_CATALOG.length;
+    api.createBoss();
+    const boss = api.world.boss;
+    boss.x = 200; boss.y = 270;
+    api.player.x = 1600; api.player.y = 270;
+    api.beginEnemyAttack(boss, "homing", 0.1);
+    api.resolveEnemyAttack(boss);
+    const shot = api.world.projectiles[0];
+    assert.equal(shot.life, 1);
+    for (let frame = 0; frame < 59; frame++) api.updateProjectiles(1 / 60);
+    assert.ok(shot.life > 0);
+    api.drawProjectiles();
+    assert.ok(api.drawing.some(call => call.method === "arc"));
+    api.player.x = shot.x; api.player.y = shot.y;
+    api.updateProjectiles(1 / 60);
+    assert.equal(shot.life, 0);
+    assert.equal(api.player.hp, 100);
+    const position = [shot.x, shot.y];
+    api.updateProjectiles(0.1);
+    assert.deepEqual([shot.x, shot.y], position);
+    api.drawing.length = 0;
+    api.drawProjectiles();
+    assert.equal(api.drawing.length, 0);
+    assert.equal(api.player.hp, 100);
+  }
 });
 
 test("Nova boundary, wave and sparks all use its actual damage radius with Expanding Star", () => {
