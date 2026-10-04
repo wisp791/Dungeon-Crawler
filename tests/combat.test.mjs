@@ -195,7 +195,7 @@ test("charge afterimages preserve the direction at which they were emitted", () 
   assert.equal(api.drawing.filter(call => call.method === "scale" && call.args[0] === -1).length, 1);
 });
 
-test("actor shadows are ground-anchored circles at desktop and mobile scales", () => {
+test("actor shadows are ground-anchored horizontal ovals at desktop and mobile scales", () => {
   for (const unit of [0.7, 1, 1.65]) {
     const api = game();
     api.state.unit = unit;
@@ -205,19 +205,20 @@ test("actor shadows are ground-anchored circles at desktop and mobile scales", (
       const draw = () => actor === api.player ? api.drawPlayer(0) : api.drawEnemy(actor, 0);
       api.drawing.length = 0;
       draw();
-      const circle = api.drawing.find(call => call.method === "arc").args;
-      assert.equal(circle[0], actor.x);
-      assert.ok(circle[1] > actor.y);
-      assert.ok(circle[2] > 0);
-      assert.equal(circle[3], 0);
-      close(circle[4], Math.PI * 2);
+      const oval = api.drawing.find(call => call.method === "ellipse").args;
+      assert.equal(oval[0], actor.x);
+      assert.ok(oval[1] > actor.y);
+      assert.ok(oval[2] > oval[3] && oval[3] > 0);
+      assert.equal(oval[4], 0);
+      assert.equal(oval[5], 0);
+      close(oval[6], Math.PI * 2);
       assert.equal(api.drawing.some(call => call.method === "fillRect"), false);
       api.drawing.length = 0;
       actor.walk = 1;
       api.player.walkCycle = 1;
       api.input.keys.add("KeyW");
       draw();
-      assert.deepEqual(api.drawing.find(call => call.method === "arc").args, circle);
+      assert.deepEqual(api.drawing.find(call => call.method === "ellipse").args, oval);
     }
   }
 });
@@ -727,7 +728,7 @@ test("mobile spell slots retain tap-to-cast", () => {
   assert.equal(api.world.projectiles[0].type, "frost");
 });
 
-test("every boss begins a recurring charge or homing attack against a distant player", () => {
+test("every boss starts a pursuit attack and threatens players within its reach", () => {
   for (let profile = -1; profile < 6; profile++) {
     const api = game();
     api.state.floor = profile === -1 ? 0 : 5;
@@ -735,7 +736,7 @@ test("every boss begins a recurring charge or homing attack against a distant pl
     api.createBoss();
     const boss = api.world.boss;
     boss.x = 200; boss.y = 270;
-    api.player.x = boss.pursuitKind === "homing" ? 400 : 630; api.player.y = 270;
+    api.player.x = boss.pursuitKind === "homing" ? 320 : 630; api.player.y = 270;
     boss.pursuitCooldown = 0;
     boss.specialCooldown = 100;
     api.updateEnemies(1 / 60);
@@ -815,7 +816,7 @@ test("freeze, stun and death interrupt an active charge", () => {
 
 test("homing shots steer toward a moving player with a bounded turn rate", () => {
   const api = game();
-  api.spawnProjectile(200, 270, 1, 0, { friendly: false, damage: 30, speed: 245, radius: 9, color: "#e4714d", life: 1, type: "homing", turnRate: 2.4, homingTime: 1 });
+  api.spawnProjectile(200, 270, 1, 0, { friendly: false, damage: 30, speed: 245, radius: 9, color: "#e4714d", life: 0.5, type: "homing", turnRate: 2.4, homingTime: 0.5 });
   const shot = api.world.projectiles[0];
   api.player.x = 450; api.player.y = 470;
   api.updateProjectiles(0.05);
@@ -829,7 +830,7 @@ test("homing shots steer toward a moving player with a bounded turn rate", () =>
   assert.equal(shot.life, 0);
 });
 
-test("every boss's homing projectiles expire after one second and cannot hit afterward", () => {
+test("every boss's homing projectiles expire after half a second and cannot hit afterward", () => {
   for (const unit of [0.7, 1, 1.65]) for (const [index, profile] of game().BOSS_CATALOG.entries()) {
     if (profile.pursuit !== "homing") continue;
     const api = game();
@@ -844,8 +845,8 @@ test("every boss's homing projectiles expire after one second and cannot hit aft
     api.beginEnemyAttack(boss, "homing", 0.1);
     api.resolveEnemyAttack(boss);
     const shot = api.world.projectiles[0];
-    assert.equal(shot.life, 1);
-    for (let frame = 0; frame < 59; frame++) api.updateProjectiles(1 / 60);
+    assert.equal(shot.life, 0.5);
+    for (let frame = 0; frame < 29; frame++) api.updateProjectiles(1 / 60);
     assert.ok(shot.life > 0);
     api.drawProjectiles();
     assert.ok(api.drawing.some(call => call.method === "arc"));

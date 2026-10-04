@@ -935,8 +935,8 @@
       const speed = 245 * unit;
       spawnProjectile(enemy.x, enemy.y, Math.cos(enemy.attackAngle), Math.sin(enemy.attackAngle), {
         friendly: false, damage: enemy.damage, speed, radius: 9 * unit,
-        color: enemy.specialColor, life: 1,
-        type: "homing", turnRate: 2.4, homingTime: 1
+        color: enemy.specialColor, life: 0.5,
+        type: "homing", turnRate: 2.4, homingTime: 0.5
       });
       burst(enemy.x, enemy.y, enemy.specialColor, 10, 75 * unit);
       return;
@@ -1001,7 +1001,7 @@
     world.projectiles.forEach((projectile) => {
       if (projectile.life <= 0) return;
       projectile.life -= dt;
-      if (projectile.type === "homing" && projectile.life <= 0) {
+      if (projectile.type === "homing" && projectile.life <= 1e-9) {
         projectile.life = 0;
         return;
       }
@@ -1161,7 +1161,7 @@
       if (enemy.dead) return;
       if (slashHitsEnemy(slash, enemy)) damageEnemy(enemy, Math.round(24 * player.power * Math.pow(1.5, buffStacks("physical"))), aim.x * 155 * unit, aim.y * 155 * unit, "melee");
     });
-    burst(player.x + aim.x * 36 * unit, player.y + aim.y * 36 * unit, "#f2dca4", 4, 62 * unit);
+    burst(player.x + aim.x * 36 * unit, player.y + aim.y * 36 * unit, "#ffffff", 4, 62 * unit);
   }
 
   function cancelCharge() {
@@ -1542,7 +1542,7 @@
       ctx.rotate(angle);
       // The faint sector is the exact damage footprint. Its curved edge and the
       // sweeping crescent share the attack's saved angle and reach, never movement-facing.
-      ctx.fillStyle = "#ffe1a0";
+      ctx.fillStyle = "#ffffff";
       ctx.globalAlpha = (1 - progress) * 0.13;
       ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, reach, -halfAngle, halfAngle); ctx.closePath(); ctx.fill();
       ctx.globalAlpha = 0.65 * (1 - progress * 0.6);
@@ -1551,7 +1551,7 @@
       ctx.arc(0, 0, reach * 0.78, halfAngle, -halfAngle, true);
       ctx.closePath(); ctx.fill();
       ctx.globalAlpha = 0.95 * (1 - progress * 0.65);
-      ctx.strokeStyle = "#ffe1a0";
+      ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 3 * unit * 0.75;
       ctx.lineCap = "round";
       ctx.beginPath();
@@ -1567,7 +1567,7 @@
     if (player.blocking) {
       const aim = aimVector();
       ctx.save(); ctx.rotate(Math.atan2(aim.y, aim.x));
-      ctx.strokeStyle = performance.now() - player.blockStartedAt < 260 ? "#ffe2a0" : "#aebdca";
+      ctx.strokeStyle = performance.now() - player.blockStartedAt < 260 ? "#fff2a0" : "#ffd84d";
       ctx.lineWidth = 4 * unit; ctx.beginPath(); ctx.arc(0, 0, 23 * unit, -1.1, 1.1); ctx.stroke(); ctx.restore();
     }
     drawActorSprite("player", 52 * unit, player.lookDirection, player.hurtFlash > 0, 0.58);
@@ -1645,7 +1645,7 @@
     ctx.globalAlpha = opacity;
     ctx.fillStyle = "rgba(0,0,0,.3)";
     ctx.beginPath();
-    ctx.arc(x, y + height * 0.35 - radius * 0.2, radius * 0.65, 0, Math.PI * 2);
+    ctx.ellipse(x, y + height * 0.35 - radius * 0.15, radius * 0.9, radius * 0.28, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
