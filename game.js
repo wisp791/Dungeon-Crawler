@@ -77,6 +77,7 @@
     { id: "max50", icon: "♥", name: "Giant's Heart", description: "Gain 50 max health and 50 temporary health for this chamber." },
     { id: "quickcast", icon: "↻", name: "Quickened Runes", description: "Spell cooldowns recover 20% faster." },
     { id: "long_blade", icon: "↔", name: "Long Blade", description: "Slash reach and charged shot size are doubled." },
+    { id: "piercing", icon: "➵", name: "Piercing Runes", description: "Charged shots and spells pass through enemies." },
     { id: "dash", icon: "»", name: "Windstep", description: "Dash recharges 25% faster." }
   ];
 
@@ -114,6 +115,7 @@
     floorCleared: false, stairs: null, elapsed: 0, rng: Math.random, objective: "", layout: "field"
   };
   let player = createPlayer();
+  const navigationCache = new Map();
 
   function loadPreference(key, fallback) {
     try {
@@ -237,6 +239,7 @@
   }
 
   function scaleWorld(scaleX, scaleY, sizeScale) {
+    navigationCache.clear();
     const points = [player, world.boss, world.stairs, ...world.enemies, ...world.projectiles, ...world.particles, ...world.floaters, ...world.pickups, ...world.torches, ...world.hazards].filter(Boolean);
     points.forEach((item) => { item.x *= scaleX; item.y *= scaleY; });
     world.obstacles.forEach((obstacle) => { obstacle.x *= scaleX; obstacle.y *= scaleY; obstacle.w *= scaleX; obstacle.h *= scaleY; });
@@ -250,6 +253,7 @@
       player.slash.angle = Math.atan2(Math.sin(player.slash.angle) * scaleY, Math.cos(player.slash.angle) * scaleX);
     }
     [...world.enemies, ...(world.boss ? [world.boss] : [])].forEach((enemy) => {
+      enemy.navigation = null;
       enemy.radius *= sizeScale;
       enemy.speed *= sizeScale;
       enemy.range *= sizeScale;
@@ -302,6 +306,7 @@
   }
 
   function generateFloor(floor) {
+    navigationCache.clear();
     cancelCharge();
     expireChamberBuff();
     const difficulty = floor;
@@ -853,27 +858,30 @@
       const nx = dx / dist;
       const ny = dy / dist;
       enemy.attackAngle = Math.atan2(dy, dx);
-      const slowFactor = 1;
-      if (enemy.isBoss) updateBoss(enemy, dt, dist, nx, ny, 1);
+      const clearAttack = navigationLineClear(enemy, player, 0);
+      if (enemy.isBoss) updateBoss(enemy, dt, dist, nx, ny, 1, clearAttack);
       else if (enemy.type === "wisp" || enemy.type === "spitter" || enemy.type === "sentinel") {
-        if (dist < 120 * state.unit) moveEntity(enemy, -nx * enemy.speed * dt * slowFactor, -ny * enemy.speed * dt * slowFactor, enemy.radius);
-        else if (dist > 210 * state.unit) moveEntity(enemy, nx * enemy.speed * dt * slowFactor, ny * enemy.speed * dt * slowFactor, enemy.radius);
-        if (enemy.attackCooldown <= 0 && dist < 380 * state.unit) beginEnemyAttack(enemy, enemy.type === "spitter" ? "poisonShot" : enemy.type === "sentinel" ? "beam" : "shot", enemy.type === "sentinel" ? 1.08 : 0.7);
+        if (dist < 120 * state.unit && clearAttack) navigateEnemy(enemy, enemy.x - nx * 150 * state.unit, enemy.y - ny * 150 * state.unit, dt);
+        else if (dist > 210 * state.unit || !clearAttack) navigateEnemy(enemy, player.x, player.y, dt);
+        if (enemy.attackCooldown <= 0 && dist < 380 * state.unit && clearAttack) beginEnemyAttack(enemy, enemy.type === "spitter" ? "poisonShot" : enemy.type === "sentinel" ? "beam" : "shot", enemy.type === "sentinel" ? 1.08 : 0.7);
       } else if (enemy.type === "charger") {
-        if (dist > 105 * state.unit) moveEntity(enemy, nx * enemy.speed * dt, ny * enemy.speed * dt, enemy.radius);
-        if (enemy.attackCooldown <= 0 && dist < 300 * state.unit) beginEnemyAttack(enemy, "charge", 0.84);
+        if (dist > 105 * state.unit || !clearAttack) navigateEnemy(enemy, player.x, player.y, dt);
+        if (enemy.attackCooldown <= 0 && dist < 300 * state.unit && clearAttack) beginEnemyAttack(enemy, "charge", 0.84);
       } else if (enemy.type === "cultist") {
-        if (dist > 135 * state.unit) moveEntity(enemy, nx * enemy.speed * dt, ny * enemy.speed * dt, enemy.radius);
-        if (enemy.attackCooldown <= 0 && dist < 180 * state.unit) beginEnemyAttack(enemy, "aoe", 0.92);
+        if (dist > 135 * state.unit || !clearAttack) navigateEnemy(enemy, player.x, player.y, dt);
+        if (enemy.attackCooldown <= 0 && dist < 180 * state.unit && clearAttack) beginEnemyAttack(enemy, "aoe", 0.92);
       } else {
-        if (dist > enemy.range) { moveEntity(enemy, nx * enemy.speed * dt, ny * enemy.speed * dt, enemy.radius); enemy.walk += dt * 8; }
+        if (dist > enemy.range || !clearAttack) { navigateEnemy(enemy, player.x, player.y, dt); enemy.walk += dt * 8; }
         else if (enemy.attackCooldown <= 0) beginEnemyAttack(enemy, "melee", enemy.type === "slime" ? 0.48 : 0.38);
       }
     });
   }
 
-  function updateBoss(boss, dt, dist, nx, ny, slowFactor) {
-    if (boss.pursuitCooldown <= 0) {
+  function updateBoss(boss, dt, dist, nx, ny, slowFactor, clearAttack = true) {
+    if (!clearAttack) {
+      navigateEnemy(boss, player.x, player.y, dt, slowFactor);
+      boss.walk += dt * 5;
+    } else if (boss.pursuitCooldown <= 0) {
       beginEnemyAttack(boss, boss.pursuitKind, boss.pursuitKind === "charge" ? 0.72 : 0.65);
       boss.pursuitCooldown = Math.max(2.8, 4.6 - Math.min(state.floor, 36) * 0.05);
     } else if (boss.specialCooldown <= 0) {
@@ -881,7 +889,7 @@
       beginEnemyAttack(boss, specialKind, specialKind === "beam" ? 1.25 : specialKind === "charge" ? 0.95 : 1.05);
       boss.specialCooldown = Math.max(3.2, 5.7 - Math.min(state.floor, 25) * 0.05);
     } else if (dist > boss.range) {
-      moveEntity(boss, nx * boss.speed * dt * slowFactor, ny * boss.speed * dt * slowFactor, boss.radius);
+      navigateEnemy(boss, player.x, player.y, dt, slowFactor);
       boss.walk += dt * 5;
     } else if (boss.attackCooldown <= 0) beginEnemyAttack(boss, "slam", 0.66);
   }
@@ -1036,9 +1044,9 @@
         for (const enemy of [...world.enemies, ...(world.boss && !world.boss.dead ? [world.boss] : [])]) {
           if (enemy.dead || projectile.hit.has(enemy)) continue;
           if (distance(projectile, enemy) <= projectile.radius + enemy.radius) {
+            if (projectile.type === "frost") { detonateFrost(projectile, projectile.pierce > 0); projectile.pierce -= 1; break; }
+            if (projectile.type === "nova" && projectile.pierce <= 0) { detonateNova(projectile); break; }
             projectile.hit.add(enemy);
-            if (projectile.type === "frost") { detonateFrost(projectile); break; }
-            if (projectile.type === "nova") { detonateNova(projectile); break; }
             damageEnemy(enemy, projectile.damage, projectile.vx, projectile.vy, projectile.type);
             if (projectile.type === "ember") {
               enemy.burnTimer = Math.max(enemy.burnTimer, 4.1);
@@ -1062,14 +1070,14 @@
     });
   }
 
-  function detonateFrost(projectile) {
+  function detonateFrost(projectile, keepFlying = false) {
     if (projectile.detonated) return;
-    projectile.detonated = true;
-    projectile.life = 0;
+    if (!keepFlying) { projectile.detonated = true; projectile.life = 0; }
     const radius = 66 * state.unit * Math.pow(1.3, buffStacks("frost_range"));
     const freezeDuration = 3;
     [...world.enemies, ...(world.boss && !world.boss.dead ? [world.boss] : [])].forEach((enemy) => {
-      if (!enemy.dead && distance(projectile, enemy) <= radius + enemy.radius) {
+      if (!enemy.dead && !projectile.hit.has(enemy) && distance(projectile, enemy) <= radius + enemy.radius) {
+        projectile.hit.add(enemy);
         damageEnemy(enemy, projectile.damage, projectile.vx * 0.2, projectile.vy * 0.2, "frost");
         enemy.frozen = Math.max(enemy.frozen, freezeDuration);
       }
@@ -1123,6 +1131,110 @@
     // Face actual travel, including retreat, knockback and charge. Preserve the
     // last direction during vertical movement or when a wall blocks horizontal travel.
     if (Math.abs(entity.x - previousX) > 0.01 * state.unit) entity.lookDirection = Math.sign(entity.x - previousX);
+  }
+
+  function navigationLineClear(from, to, radius) {
+    return !world.obstacles.some((rect) => {
+      if (circleIntersectsRect(from.x, from.y, radius, rect) || circleIntersectsRect(to.x, to.y, radius, rect)) return true;
+      // Clip the segment against the solid rectangle, then check the rounded
+      // clearance around its corners so actors cannot cut through stone.
+      let enter = 0, leave = 1;
+      for (const [start, delta, min, max] of [[from.x, to.x - from.x, rect.x, rect.x + rect.w], [from.y, to.y - from.y, rect.y, rect.y + rect.h]]) {
+        if (Math.abs(delta) < 1e-9) { if (start < min || start > max) { enter = 2; break; } }
+        else {
+          const a = (min - start) / delta, b = (max - start) / delta;
+          enter = Math.max(enter, Math.min(a, b));
+          leave = Math.min(leave, Math.max(a, b));
+        }
+      }
+      if (enter <= leave) return true;
+      return [[rect.x, rect.y], [rect.x + rect.w, rect.y], [rect.x, rect.y + rect.h], [rect.x + rect.w, rect.y + rect.h]]
+        .some(([x, y]) => pointToSegmentDistance(x, y, from.x, from.y, to.x, to.y) <= radius);
+    });
+  }
+
+  function navigationGraph(radius) {
+    const key = radius.toFixed(3);
+    const cached = navigationCache.get(key);
+    if (cached && cached.obstacles === world.obstacles && cached.width === world.width && cached.height === world.height) return cached;
+    const clearance = radius + 3 * state.unit;
+    const margin = 20 * state.unit + clearance;
+    const nodes = [];
+    world.obstacles.forEach((rect) => {
+      for (const x of [rect.x - clearance, rect.x + rect.w + clearance]) for (const y of [rect.y - clearance, rect.y + rect.h + clearance]) {
+        if (x < margin || x > world.width - margin || y < margin || y > world.height - margin || collidesWithObstacle(x, y, clearance)) continue;
+        nodes.push({ x, y });
+      }
+    });
+    const edges = nodes.map(() => []);
+    for (let a = 0; a < nodes.length; a++) for (let b = a + 1; b < nodes.length; b++) {
+      if (!navigationLineClear(nodes[a], nodes[b], radius)) continue;
+      const cost = distance(nodes[a], nodes[b]);
+      edges[a].push({ index: b, cost }); edges[b].push({ index: a, cost });
+    }
+    const graph = { nodes, edges, obstacles: world.obstacles, width: world.width, height: world.height };
+    navigationCache.set(key, graph);
+    return graph;
+  }
+
+  function findNavigationPath(from, goal, radius, graph) {
+    const points = [...graph.nodes, goal];
+    const end = points.length - 1;
+    const costs = points.map((point) => navigationLineClear(from, point, radius) ? distance(from, point) : Infinity);
+    const parents = points.map(() => -1), visited = points.map(() => false);
+    const goalLinks = graph.nodes.map((point) => navigationLineClear(point, goal, radius));
+    for (let step = 0; step < points.length; step++) {
+      let current = -1;
+      for (let index = 0; index < points.length; index++) if (!visited[index] && Number.isFinite(costs[index]) && (current < 0 || costs[index] < costs[current])) current = index;
+      if (current < 0 || current === end) break;
+      visited[current] = true;
+      const edges = graph.edges[current];
+      const relax = (index, cost) => {
+        if (costs[current] + cost < costs[index]) { costs[index] = costs[current] + cost; parents[index] = current; }
+      };
+      edges.forEach(({ index, cost }) => relax(index, cost));
+      if (goalLinks[current]) relax(end, distance(points[current], goal));
+    }
+    let destination = end;
+    if (!Number.isFinite(costs[end])) {
+      // If a large actor cannot fit into the player's pocket, approach the
+      // closest reachable point instead of repeatedly pushing into the wall.
+      destination = -1;
+      let nearest = distance(from, goal);
+      graph.nodes.forEach((point, index) => {
+        const gap = distance(point, goal);
+        if (Number.isFinite(costs[index]) && gap < nearest) { nearest = gap; destination = index; }
+      });
+    }
+    const path = [];
+    for (let index = destination; index >= 0; index = parents[index]) path.unshift(points[index]);
+    return path;
+  }
+
+  function navigateEnemy(enemy, targetX, targetY, dt, speedScale = 1) {
+    const goal = findClearPoint(targetX, targetY, enemy.radius);
+    let waypoint = goal;
+    if (navigationLineClear(enemy, goal, enemy.radius)) enemy.navigation = null;
+    else {
+      const graph = navigationGraph(enemy.radius);
+      let navigation = enemy.navigation;
+      if (!navigation || navigation.graph !== graph || navigation.timer <= 0 || distance(navigation.goal, goal) > 28 * state.unit) {
+        navigation = { graph, goal, timer: 0.4, path: findNavigationPath(enemy, goal, enemy.radius, graph) };
+        enemy.navigation = navigation;
+      }
+      navigation.timer -= dt;
+      while (navigation.path.length && distance(enemy, navigation.path[0]) < 2 * state.unit) navigation.path.shift();
+      while (navigation.path.length > 1 && navigationLineClear(enemy, navigation.path[1], enemy.radius)) navigation.path.shift();
+      if (!navigation.path.length) return;
+      waypoint = navigation.path[0];
+    }
+    const dx = waypoint.x - enemy.x, dy = waypoint.y - enemy.y;
+    const length = Math.hypot(dx, dy);
+    if (length < 0.01) return;
+    const travel = Math.min(length, enemy.speed * dt * speedScale);
+    const before = { x: enemy.x, y: enemy.y };
+    moveEntity(enemy, dx / length * travel, dy / length * travel, enemy.radius);
+    if (enemy.navigation && distance(before, enemy) < travel * 0.25) enemy.navigation.timer = 0;
   }
 
   function collidesWithObstacle(x, y, radius) {
@@ -1233,7 +1345,8 @@
     projectile.detonated = true;
     projectile.life = 0;
     [...world.enemies, ...(world.boss && !world.boss.dead ? [world.boss] : [])].forEach((enemy) => {
-      if (!enemy.dead && distance(projectile, enemy) <= projectile.blastRadius + enemy.radius) {
+      if (!enemy.dead && !projectile.hit?.has(enemy) && distance(projectile, enemy) <= projectile.blastRadius + enemy.radius) {
+        projectile.hit?.add(enemy);
         const dx = enemy.x - projectile.x;
         const dy = enemy.y - projectile.y;
         const length = Math.max(1, Math.hypot(dx, dy));
@@ -1254,7 +1367,8 @@
 
   function spawnProjectile(x, y, dx, dy, options) {
     const length = Math.max(0.001, Math.hypot(dx, dy));
-    world.projectiles.push({ x, y, vx: (dx / length) * options.speed, vy: (dy / length) * options.speed, friendly: options.friendly, damage: options.damage, radius: options.radius, color: options.color, life: options.life, type: options.type, pierce: options.pierce ?? 0, hit: new Set(), pulse: 0, detonated: false, targetX: options.targetX, targetY: options.targetY, blastRadius: options.blastRadius, turnRate: options.turnRate || 0, homingTime: options.homingTime || 0 });
+    const pierce = options.friendly && buffStacks("piercing") ? Infinity : options.pierce ?? 0;
+    world.projectiles.push({ x, y, vx: (dx / length) * options.speed, vy: (dy / length) * options.speed, friendly: options.friendly, damage: options.damage, radius: options.radius, color: options.color, life: options.life, type: options.type, pierce, hit: new Set(), pulse: 0, detonated: false, targetX: options.targetX, targetY: options.targetY, blastRadius: options.blastRadius, turnRate: options.turnRate || 0, homingTime: options.homingTime || 0 });
   }
 
   function requestDash() {
@@ -1486,6 +1600,10 @@
       const sourceW = w / scale, sourceH = h / scale;
       ctx.drawImage(image, (image.naturalWidth - sourceW) / 2, (image.naturalHeight - sourceH) / 2, sourceW, sourceH, 0, 0, w, h);
     }
+    if (world.theme !== "grass") {
+      ctx.fillStyle = "rgba(3,7,14,.48)";
+      ctx.fillRect(0, 0, w, h);
+    }
     const border = Math.max(12, 20 * unit);
     ctx.fillStyle = "rgba(8,12,16,.58)";
     ctx.fillRect(0, 0, w, border); ctx.fillRect(0, h - border, w, border); ctx.fillRect(0, 0, border, h); ctx.fillRect(w - border, 0, border, h);
@@ -1512,6 +1630,8 @@
       // The cropped stone fills exactly the same rectangle used by collisions.
       const w = horizontal ? obstacle.h : obstacle.w;
       const h = horizontal ? obstacle.w : obstacle.h;
+      ctx.filter = "brightness(1.35)";
+      ctx.shadowColor = "rgba(0,0,0,.65)"; ctx.shadowBlur = 6 * state.unit;
       drawSprite("wall", -w / 2, -h / 2, w, h);
       ctx.restore();
     });

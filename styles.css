@@ -793,8 +793,8 @@ kbd {
 .buff-choice:hover,
 .buff-choice:focus-visible { transform: translateY(-4px); border-color: var(--gold); filter: brightness(1.1); }
 .buff-choice-icon { display: grid; width: 48px; height: 48px; place-items: center; color: #d8a4ff; font-size: 27px; filter: drop-shadow(0 0 7px rgba(190,132,240,.35)); }
-.buff-choice strong { margin-top: 8px; color: var(--gold-light); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-.buff-choice small { margin-top: 9px; color: #9b9ca4; font-family: system-ui, sans-serif; font-size: 12px; line-height: 1.4; }
+.buff-choice strong { display: block; margin-top: 8px; color: var(--gold-light); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.buff-choice small { display: block; margin-top: 9px; color: #9b9ca4; font-family: system-ui, sans-serif; font-size: 12px; line-height: 1.4; }
 .buff-choice .buff-stack { position: absolute; top: 8px; right: 8px; color: #756883; font-size: 8px; letter-spacing: .08em; }
 
 .floor-transition {

@@ -69,7 +69,7 @@ function game() {
     collidesWithObstacle, circleIntersectsRect, findClearPoint, applyBuff, expireChamberBuff,
     showBuffChoices, BUFF_CATALOG, damagePlayer, descendFloor, scaleWorld, updateEnemies,
     updateBoss, beginEnemyAttack, resolveEnemyAttack, updateEnemyCharge, updatePickups,
-    killEnemy, drawHazards, spawnProjectile, moveEntity
+    killEnemy, drawHazards, spawnProjectile, moveEntity, navigateEnemy, navigationLineClear
   };`);
   vm.runInNewContext(instrumented, sandbox);
   const api = sandbox.game;
@@ -698,6 +698,186 @@ test("new wall proportions keep enemies, bosses and stairs reachable across rand
         assert.equal(cells[row * columns + col], 2, `Blocked ${target.type || "stairs"} on ${width}x${height}, seed ${seed}, floor ${floor}`);
       }
     }
+  }
+});
+
+test("every enemy and boss navigates around a blocking wall without entering it", () => {
+  for (const unit of [0.7, 1, 1.65]) for (const id of ["slime", "skeleton", "wisp", "spitter", "charger", "cultist", "sentinel", "moss", "bone", "cinder", "hollow", "veil", "plague", "storm"]) {
+    const api = game();
+    api.state.unit = unit;
+    api.world.width = 960 * unit; api.world.height = 540 * unit;
+    api.world.obstacles = [{ x: 420 * unit, y: 130 * unit, w: 32 * unit, h: 250 * unit }];
+    api.player.x = 720 * unit; api.player.y = 270 * unit;
+    const bossIndex = api.BOSS_CATALOG.findIndex(profile => profile.id === id);
+    const isBoss = id === "moss" || bossIndex >= 0;
+    let actor;
+    if (isBoss) {
+      api.state.floor = id === "moss" ? 0 : 1;
+      api.world.rng = () => (bossIndex + 0.5) / 6;
+      api.createBoss(); actor = api.world.boss;
+    } else { actor = api.createEnemy(id, 280 * unit, 270 * unit, 0); api.world.enemies = [actor]; }
+    Object.assign(actor, { x: 280 * unit, y: 270 * unit, attackCooldown: 100, specialCooldown: 100, pursuitCooldown: 100 });
+    let wentAround = false;
+    for (let frame = 0; frame < 1200 && actor.x < 500 * unit; frame++) {
+      api.updateEnemies(1 / 60);
+      assert.equal(api.collidesWithObstacle(actor.x, actor.y, actor.radius), false, `${id} collision`);
+      if (actor.y < 130 * unit || actor.y > 380 * unit) wentAround = true;
+    }
+    assert.ok(wentAround && actor.x >= 500 * unit, `${id} stuck at ${actor.x / unit},${actor.y / unit}`);
+  }
+});
+
+test("ranged enemies reposition instead of continuously casting into walls", () => {
+  for (const type of ["wisp", "spitter", "sentinel", "charger", "cultist"]) {
+    const api = game();
+    api.world.obstacles = [{ x: 470, y: 170, w: 32, h: 200 }];
+    api.player.x = 530; api.player.y = 270;
+    const enemy = api.createEnemy(type, 440, 270, 0);
+    enemy.attackCooldown = 0;
+    api.world.enemies = [enemy];
+    api.updateEnemies(1 / 60);
+    assert.equal(enemy.telegraph, 0);
+    assert.ok(enemy.navigation?.path.length > 0);
+    for (let frame = 0; frame < 600 && !enemy.telegraph; frame++) api.updateEnemies(1 / 60);
+    assert.ok(enemy.telegraph > 0, `${type} must find a firing position`);
+    assert.equal(api.navigationLineClear(enemy, api.player, 0), true);
+  }
+});
+
+test("retreating ranged enemies can move around a wall behind them", () => {
+  for (const type of ["wisp", "spitter", "sentinel"]) {
+    const api = game();
+    api.world.obstacles = [{ x: 380, y: 170, w: 32, h: 200 }];
+    api.player.x = 500; api.player.y = 270;
+    const enemy = api.createEnemy(type, 432, 270, 0);
+    enemy.attackCooldown = 100; api.world.enemies = [enemy];
+    for (let frame = 0; frame < 90; frame++) {
+      api.updateEnemies(1 / 60);
+      assert.equal(api.collidesWithObstacle(enemy.x, enemy.y, enemy.radius), false);
+    }
+    assert.ok(Math.abs(enemy.y - 270) > 20, `${type} should retreat around stone`);
+  }
+});
+
+test("navigation handles concave walls and refreshes when the target or arena changes", () => {
+  const api = game();
+  api.world.obstacles = [
+    { x: 300, y: 140, w: 32, h: 260 },
+    { x: 300, y: 140, w: 250, h: 32 },
+    { x: 300, y: 368, w: 250, h: 32 }
+  ];
+  const enemy = api.createEnemy("skeleton", 410, 270, 0);
+  api.world.enemies = [enemy];
+  api.player.x = 180; api.player.y = 270;
+  enemy.attackCooldown = 100;
+  let leftPocket = false;
+  for (let frame = 0; frame < 1200 && enemy.x > 250; frame++) {
+    api.updateEnemies(1 / 60);
+    assert.equal(api.collidesWithObstacle(enemy.x, enemy.y, enemy.radius), false);
+    if (enemy.x > 565) leftPocket = true;
+  }
+  assert.ok(leftPocket && enemy.x < 250);
+  api.player.x = 700; api.player.y = 460;
+  api.updateEnemies(1 / 60);
+  api.world.width *= 0.9; api.world.height *= 1.1;
+  api.scaleWorld(0.9, 1.1, 1);
+  assert.equal(enemy.navigation, null);
+  for (let frame = 0; frame < 900 && Math.hypot(enemy.x - api.player.x, enemy.y - api.player.y) > 40; frame++) api.updateEnemies(1 / 60);
+  assert.ok(Math.hypot(enemy.x - api.player.x, enemy.y - api.player.y) <= 40);
+});
+
+test("navigation reaches the player across generated desktop and mobile chambers", () => {
+  for (const [width, height, unit] of [[960, 540, 1], [390, 844, 0.7]]) {
+    const api = game();
+    Object.assign(api.world, { width, height }); api.state.unit = unit;
+    for (const seed of [1, 57, 812, 9341]) for (const floor of [1, 2, 3, 5, 10]) {
+      api.state.runSeed = seed; api.state.floor = floor; api.generateFloor(floor);
+      for (const spawned of api.world.enemies) {
+        const enemy = api.createEnemy("skeleton", spawned.x, spawned.y, 0);
+        for (let frame = 0; frame < 1800 && Math.hypot(enemy.x - api.player.x, enemy.y - api.player.y) > 36 * unit; frame++) {
+          api.navigateEnemy(enemy, api.player.x, api.player.y, 1 / 60);
+          assert.equal(api.collidesWithObstacle(enemy.x, enemy.y, enemy.radius), false);
+        }
+        assert.ok(Math.hypot(enemy.x - api.player.x, enemy.y - api.player.y) <= 36 * unit, `Stuck on ${width}x${height}, seed ${seed}, floor ${floor}`);
+      }
+    }
+  }
+});
+
+test("Piercing Runes carries charged shots and every spell through multiple enemies once", () => {
+  for (const type of ["charged", "ember", "frost", "nova"]) {
+    const api = game();
+    api.chooseBuff("piercing");
+    api.player.x = 180; api.player.y = 270;
+    const enemies = [300, 430, 560].map(x => api.createEnemy("sentinel", x, 270, 0));
+    api.world.enemies = enemies;
+    api.aim(760, 270);
+    if (type === "charged") { api.pointer("pointerdown", 760, 270); api.updatePlayer(0.3); api.pointer("pointerup", 760, 270); }
+    else api.castSpell({ ember: 0, frost: 1, nova: 2 }[type]);
+    const shot = api.world.projectiles[0];
+    assert.equal(shot.pierce, Infinity);
+    for (let frame = 0; frame < 200 && shot.life > 0; frame++) api.updateProjectiles(1 / 60);
+    for (const enemy of enemies) {
+      assert.equal(enemy.hp, enemy.maxHp - shot.damage, `${type} must hit each enemy once`);
+      assert.equal(shot.hit.has(enemy), true);
+      if (type === "frost") assert.equal(enemy.frozen, 3);
+      if (type === "ember") assert.ok(enemy.burnTimer > 0);
+    }
+    if (type === "nova") { close(shot.x, 760); assert.equal(api.world.hazards[0].type, "nova"); }
+  }
+});
+
+test("charged shots and spells retain their first-impact behavior without Piercing Runes", () => {
+  for (const type of ["charged", "ember", "frost", "nova"]) {
+    const api = game();
+    api.player.x = 180; api.player.y = 270;
+    const first = api.createEnemy("sentinel", 300, 270, 0), behind = api.createEnemy("sentinel", 580, 270, 0);
+    api.world.enemies = [first, behind]; api.aim(760, 270);
+    if (type === "charged") { api.pointer("pointerdown", 760, 270); api.updatePlayer(0.3); api.pointer("pointerup", 760, 270); }
+    else api.castSpell({ ember: 0, frost: 1, nova: 2 }[type]);
+    const shot = api.world.projectiles[0];
+    for (let frame = 0; frame < 120 && shot.life > 0; frame++) api.updateProjectiles(1 / 60);
+    assert.equal(shot.life, 0);
+    assert.equal(first.hp, first.maxHp - shot.damage);
+    assert.equal(behind.hp, behind.maxHp);
+    assert.ok(shot.x < 340);
+  }
+});
+
+test("piercing Nova still bursts at the cursor without double-hitting pierced targets", () => {
+  const api = game();
+  api.chooseBuff("piercing");
+  api.player.x = 200; api.player.y = 270;
+  const through = api.createEnemy("sentinel", 580, 270, 0);
+  const splash = api.createEnemy("sentinel", 600, 330, 0);
+  api.world.enemies = [through, splash]; api.aim(600, 270);
+  api.castSpell(2);
+  const shot = api.world.projectiles[0];
+  for (let frame = 0; frame < 120 && !shot.detonated; frame++) api.updateProjectiles(1 / 60);
+  assert.equal(through.hp, through.maxHp - 38);
+  assert.equal(splash.hp, splash.maxHp - 38);
+  close(shot.x, 600); close(shot.y, 270);
+});
+
+test("piercing cannot bypass walls or change hostile projectiles and expires with the chamber", () => {
+  for (const type of ["charged", "ember", "frost", "nova"]) {
+    const api = game(); api.chooseBuff("piercing");
+    api.player.x = 200; api.player.y = 270;
+    api.world.obstacles = [{ x: 450, y: 200, w: 32, h: 140 }];
+    const behind = api.createEnemy("sentinel", 650, 270, 0); api.world.enemies = [behind];
+    api.aim(800, 270);
+    if (type === "charged") { api.pointer("pointerdown", 800, 270); api.updatePlayer(0.3); api.pointer("pointerup", 800, 270); }
+    else api.castSpell({ ember: 0, frost: 1, nova: 2 }[type]);
+    const shot = api.world.projectiles[0];
+    for (let frame = 0; frame < 180 && shot.life > 0; frame++) api.updateProjectiles(1 / 60);
+    assert.equal(shot.life, 0);
+    assert.ok(shot.x < 482);
+    assert.equal(behind.hp, behind.maxHp);
+    api.spawnProjectile(300, 100, 1, 0, { friendly: false, speed: 100, damage: 10, radius: 5, color: "#fff", life: 1, type: "enemy" });
+    assert.equal(api.world.projectiles.at(-1).pierce, 0);
+    api.expireChamberBuff();
+    api.player.spellCooldowns[0] = 0; api.player.mana = 100; api.castSpell(0);
+    assert.equal(api.world.projectiles.at(-1).pierce, 0);
   }
 });
 
