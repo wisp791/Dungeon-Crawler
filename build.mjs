@@ -10,8 +10,8 @@ await rm(output, { recursive: true, force: true });
 await mkdir(client, { recursive: true });
 await mkdir(server, { recursive: true });
 
-for (const file of ["index.html", "styles.css", "game.js", "og.png"]) {
-  await cp(join(root, file), join(client, file));
+for (const file of ["index.html", "styles.css", "game.js", "sprites"]) {
+  await cp(join(root, file), join(client, file), { recursive: true });
 }
 
 const worker = `export default {

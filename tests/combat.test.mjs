@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import vm from "node:vm";
 import test from "node:test";
 
@@ -9,6 +9,8 @@ function game() {
   const elements = new Map();
   const drawing = [];
   const captures = new Set();
+  const timers = new Map();
+  let nextTimer = 0;
   const context = new Proxy({}, {
     get(target, key) {
       if (key in target) return target[key];
@@ -52,7 +54,8 @@ function game() {
     },
     window: element("window"), matchMedia: () => ({ matches: false }),
     performance: { now: () => 0 }, localStorage: { getItem: () => null, setItem() {} },
-    setTimeout: () => 1, clearTimeout() {}, requestAnimationFrame() {},
+    setTimeout: (callback, delay) => { const id = ++nextTimer; timers.set(id, { callback, delay }); return id; },
+    clearTimeout: (id) => timers.delete(id), requestAnimationFrame() {},
     HTMLButtonElement: class {}, HTMLInputElement: class {}, HTMLSelectElement: class {}
   };
   // Instrument only the test copy of this closure; production has no exposed state.
@@ -61,7 +64,10 @@ function game() {
     startCharge, releaseCharge, cancelCharge, clearInput, updatePlayer, updateProjectiles,
     updateHazards, createEnemy, createBoss, generateFloor, requestDash, openPause, resumeGame,
     drawPlayer, drawCrosshair, render, resizeCanvas, aimVector, aimTarget, slashHitsEnemy,
-    detonateNova, BOSS_CATALOG, chooseEnemyType
+    detonateNova, BOSS_CATALOG, chooseEnemyType, sprites, SPRITE_FILES, opaqueBounds,
+    drawObstacles, drawStairs, drawEnemy, drawProjectiles, stairBounds, stairClearance,
+    collidesWithObstacle, circleIntersectsRect, findClearPoint, applyBuff, expireChamberBuff,
+    showBuffChoices, BUFF_CATALOG, damagePlayer, descendFloor, scaleWorld
   };`);
   vm.runInNewContext(instrumented, sandbox);
   const api = sandbox.game;
@@ -74,6 +80,17 @@ function game() {
   api.window = sandbox.window;
   api.drawing = drawing;
   api.context = context;
+  api.element = element;
+  api.finishDescent = () => {
+    const [id, timer] = [...timers].find(([, item]) => item.delay === 1750);
+    timers.delete(id);
+    timer.callback();
+  };
+  api.chooseBuff = (id) => {
+    api.state.scene = "buff";
+    api.state.buffChoices = [id];
+    api.applyBuff(id);
+  };
   api.aim = (x, y) => Object.assign(api.input, { mouseX: x, mouseY: y, hasMouseAim: true, pointerInside: true });
   api.pointer = (event, x = 680, y = 270, button = 0, id = 7) => api.canvas.dispatch(event, {
     pointerType: "mouse", pointerId: id, button, clientX: x + 20, clientY: y + 30
@@ -108,7 +125,7 @@ test("slashes hit and render toward cursor in all eight directions, independent 
     const origin = api.drawing.find((call) => call.method === "translate").args;
     assert.deepEqual(origin, [480, 270]);
     const boundary = api.drawing.find((call) => call.method === "arc").args;
-    assert.deepEqual(boundary, [0, 0, 70, -api.player.slash.halfAngle, api.player.slash.halfAngle]);
+    assert.deepEqual(boundary, [0, 0, 52.5, -api.player.slash.halfAngle, api.player.slash.halfAngle]);
   }
 });
 
@@ -117,8 +134,8 @@ test("the curved footprint accounts for enemy size at reach and angular edges", 
   api.aim(680, 270);
   api.requestAttack();
   const slash = api.player.slash;
-  assert.equal(api.slashHitsEnemy(slash, { x: 555, y: 270, radius: 5 }), true);
-  assert.equal(api.slashHitsEnemy(slash, { x: 556, y: 270, radius: 5 }), false);
+  assert.equal(api.slashHitsEnemy(slash, { x: 537.5, y: 270, radius: 5 }), true);
+  assert.equal(api.slashHitsEnemy(slash, { x: 538.5, y: 270, radius: 5 }), false);
   assert.equal(api.slashHitsEnemy(slash, { x: 430, y: 270, radius: 10 }), false);
   const angle = slash.halfAngle + 0.04;
   assert.equal(api.slashHitsEnemy(slash, { x: 480 + Math.cos(angle) * 50, y: 270 + Math.sin(angle) * 50, radius: 3 }), true);
@@ -129,13 +146,13 @@ test("Long Blade increases damage reach and visual reach together", () => {
   const api = game();
   api.state.buffs.long_blade = 1;
   api.aim(680, 270);
-  const enemy = api.createEnemy("skeleton", 600, 270, 0);
+  const enemy = api.createEnemy("skeleton", 590, 270, 0);
   api.world.enemies = [enemy];
   api.requestAttack();
   assert.equal(enemy.hp, enemy.maxHp - 24);
-  assert.equal(api.player.slash.reach, 140);
+  assert.equal(api.player.slash.reach, 105);
   api.drawPlayer(0);
-  assert.equal(api.drawing.find((call) => call.method === "arc").args[2], 140);
+  assert.equal(api.drawing.find((call) => call.method === "arc").args[2], 105);
 });
 
 test("screen shake and CSS canvas scaling preserve cursor aim", () => {
@@ -347,4 +364,198 @@ test("updated enemy and boss pools remain intact", () => {
   assert.deepEqual(Array.from(api.BOSS_CATALOG, (boss) => boss.id), ["bone", "cinder", "hollow", "veil", "plague", "storm"]);
   api.createBoss();
   assert.equal(api.world.boss.name, "THE MOSS GUARDIAN");
+});
+
+test("Long Blade doubles charged shot visuals and collision size without changing damage", () => {
+  for (const duration of [0.3, 1]) {
+    const radii = [];
+    for (const buff of [false, true]) {
+      const api = game();
+      if (buff) api.chooseBuff("long_blade");
+      const graze = api.createEnemy("sentinel", 650, 304, 0);
+      api.world.enemies = [graze];
+      api.pointer("pointerdown");
+      api.updatePlayer(duration);
+      api.pointer("pointerup");
+      const shot = api.world.projectiles[0];
+      radii.push(shot.radius);
+      api.drawProjectiles();
+      assert.equal(api.drawing.filter((call) => call.method === "fillRect")[1].args[2], shot.radius * 2);
+      assert.equal(shot.damage, duration === 1 ? 48 : 27);
+      for (let frame = 0; frame < 30; frame++) api.updateProjectiles(1 / 60);
+      assert.equal(graze.hp < graze.maxHp, buff && duration === 1);
+    }
+    close(radii[1], radii[0] * 2);
+  }
+});
+
+test("each blessing expires on descent before normal floor progression", () => {
+  for (const buff of game().BUFF_CATALOG) {
+    const api = game();
+    api.state.floor = 1;
+    api.player.hp = 60;
+    api.chooseBuff(buff.id);
+    assert.equal(api.state.buffs[buff.id], 1);
+    api.world.floorCleared = true;
+    api.descendFloor();
+    assert.equal(Object.keys(api.state.buffs).length, 0);
+    assert.equal(api.player.maxHp, 100);
+    assert.equal(api.player.hp, 60);
+    assert.ok(api.element("#chamberBuffCard").classList.contains("is-hidden"));
+    api.finishDescent();
+    assert.equal(api.state.floor, 2);
+    assert.equal(api.player.maxHp, 103);
+    assert.equal(api.player.hp, 94);
+    assert.equal(api.state.scene, "buff");
+    assert.equal(api.state.buffChoices.length, 3);
+    assert.equal(new Set(api.state.buffChoices).size, 3);
+  }
+});
+
+test("temporary health absorbs damage first and does not remove spent health twice", () => {
+  const api = game();
+  api.player.hp = 60;
+  api.chooseBuff("max50");
+  assert.equal(api.player.maxHp, 150);
+  assert.equal(api.player.hp, 110);
+  api.damagePlayer(30, null, true);
+  assert.equal(api.player.chamberHealth, 20);
+  assert.equal(api.player.hp, 80);
+  api.expireChamberBuff();
+  assert.equal(api.player.hp, 60);
+  assert.equal(api.player.maxHp, 100);
+  api.player.invulnerable = 0;
+  api.chooseBuff("health20");
+  api.damagePlayer(30, null, true);
+  assert.equal(api.player.chamberHealth, 0);
+  assert.equal(api.player.hp, 50);
+  api.generateFloor(2);
+  assert.equal(api.player.hp, 50);
+  assert.equal(api.player.chamberMaxHp, 0);
+});
+
+test("buff selection permits exactly one offered blessing per chamber", () => {
+  const api = game();
+  api.showBuffChoices();
+  const first = api.state.buffChoices[0];
+  const unoffered = api.BUFF_CATALOG.find((buff) => !api.state.buffChoices.includes(buff.id)).id;
+  api.applyBuff(unoffered);
+  assert.equal(Object.keys(api.state.buffs).length, 0);
+  assert.equal(api.state.scene, "buff");
+  api.applyBuff(first);
+  const hp = api.player.hp, maxHp = api.player.maxHp;
+  api.applyBuff(first);
+  api.applyBuff("max50");
+  assert.deepEqual(Object.keys(api.state.buffs), [first]);
+  assert.equal(api.player.hp, hp);
+  assert.equal(api.player.maxHp, maxHp);
+});
+
+test("every player, enemy, boss, obstacle and background sprite exists", () => {
+  const api = game();
+  for (const [id, sprite] of Object.entries(api.sprites)) {
+    const path = new URL(`../${sprite.file}`, import.meta.url);
+    assert.ok(existsSync(path), `${id} missing: ${sprite.file}`);
+    const png = readFileSync(path);
+    assert.equal(png.subarray(1, 4).toString(), "PNG");
+    assert.ok(png.readUInt32BE(16) > 0 && png.readUInt32BE(20) > 0);
+  }
+  assert.ok(existsSync(new URL("../sprites/og.png", import.meta.url)));
+});
+
+test("transparent sprite padding is excluded from the draw and collision footprint", () => {
+  const api = game();
+  const pixels = new Uint8ClampedArray(6 * 8 * 4);
+  for (let y = 2; y <= 6; y++) for (let x = 1; x <= 4; x++) pixels[(y * 6 + x) * 4 + 3] = 255;
+  pixels[3] = 12; // Low-alpha fringe should not become a large invisible obstacle.
+  const bounds = api.opaqueBounds(pixels, 6, 8);
+  assert.deepEqual({ ...bounds }, { x: 1, y: 2, w: 4, h: 5 });
+  assert.throws(() => api.opaqueBounds(new Uint8ClampedArray(4), 1, 1), /Empty sprite/);
+});
+
+test("wall render rectangles match collision bounds in either orientation", () => {
+  const api = game();
+  api.sprites.wall.image = {};
+  api.sprites.wall.source = { x: 184, y: 60, w: 519, h: 1653 };
+  for (const [w, h] of [[32, 32 * 1653 / 519], [32 * 1653 / 519, 32]]) {
+    const wall = { x: 200, y: 140, w, h };
+    api.world.obstacles = [wall];
+    api.drawing.length = 0;
+    api.drawObstacles();
+    assert.deepEqual(api.drawing.find((call) => call.method === "translate").args, [wall.x + w / 2, wall.y + h / 2]);
+    const image = api.drawing.find((call) => call.method === "drawImage").args;
+    assert.deepEqual(image.slice(1, 5), [184, 60, 519, 1653]);
+    close(image[7] * image[8], w * h);
+    assert.equal(api.collidesWithObstacle(wall.x - 14, wall.y + h / 2, 13), false);
+    assert.equal(api.collidesWithObstacle(wall.x - 12.9, wall.y + h / 2, 13), true);
+  }
+  api.generateFloor(6);
+  for (const wall of api.world.obstacles) close(Math.max(wall.w, wall.h) / Math.min(wall.w, wall.h), 1653 / 519);
+  for (const actor of [api.player, ...api.world.enemies]) assert.equal(api.collidesWithObstacle(actor.x, actor.y, actor.radius), false);
+});
+
+test("stairs use the visible open steps for descent, including after resize", () => {
+  for (const unit of [0.7, 1, 1.65]) {
+    const api = game();
+    api.state.unit = unit;
+    api.world.stairs = { x: 480, y: 270 };
+    api.world.floorCleared = true;
+    api.sprites.stairs.image = {};
+    api.sprites.stairs.source = { x: 375, y: 356, w: 519, h: 521 };
+    const bounds = api.stairBounds();
+    api.drawStairs(0);
+    assert.deepEqual(api.drawing.find((call) => call.method === "drawImage").args.slice(5), [bounds.x, bounds.y, bounds.w, bounds.h]);
+    api.player.x = bounds.x - api.player.radius * unit - 1;
+    api.player.y = 270;
+    api.updatePlayer(0);
+    assert.equal(api.state.scene, "playing");
+    api.scaleWorld(0.9, 1.1, 1);
+    api.player.x = api.world.stairs.x;
+    api.player.y = api.world.stairs.y;
+    api.updatePlayer(0);
+    assert.equal(api.state.scene, "transition");
+  }
+});
+
+test("new wall proportions keep enemies, bosses and stairs reachable across random layouts", () => {
+  for (const [width, height, unit] of [[960, 540, 1], [390, 844, 0.7]]) {
+    const api = game();
+    api.world.width = width;
+    api.world.height = height;
+    api.state.unit = unit;
+    for (const seed of [1, 57, 812, 9341]) for (const floor of [0, 1, 2, 3, 5, 10]) {
+      api.state.runSeed = seed;
+      api.state.floor = floor;
+      api.generateFloor(floor);
+      api.createBoss();
+      const stairs = api.findClearPoint(width / 2, height * 0.14, api.stairClearance());
+      const radius = api.player.radius * unit;
+      const margin = 20 * unit + radius;
+      const step = 6 * unit;
+      const columns = Math.floor((width - margin * 2) / step) + 1;
+      const rows = Math.floor((height - margin * 2) / step) + 1;
+      const cells = new Uint8Array(columns * rows);
+      for (let row = 0; row < rows; row++) for (let col = 0; col < columns; col++) {
+        if (api.collidesWithObstacle(margin + col * step, margin + row * step, radius)) cells[row * columns + col] = 1;
+      }
+      const startCol = Math.round((api.player.x - margin) / step);
+      const startRow = Math.round((api.player.y - margin) / step);
+      const queue = [startRow * columns + startCol];
+      assert.equal(cells[queue[0]], 0);
+      cells[queue[0]] = 2;
+      for (let next = 0; next < queue.length; next++) {
+        const index = queue[next], col = index % columns, row = Math.floor(index / columns);
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const x = col + dx, y = row + dy, neighbor = y * columns + x;
+          if (x < 0 || x >= columns || y < 0 || y >= rows || cells[neighbor] !== 0) continue;
+          cells[neighbor] = 2;
+          queue.push(neighbor);
+        }
+      }
+      for (const target of [...api.world.enemies, api.world.boss, stairs]) {
+        const col = Math.round((target.x - margin) / step), row = Math.round((target.y - margin) / step);
+        assert.equal(cells[row * columns + col], 2, `Blocked ${target.type || "stairs"} on ${width}x${height}, seed ${seed}, floor ${floor}`);
+      }
+    }
+  }
 });

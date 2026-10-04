@@ -15,11 +15,11 @@
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://the-last-descent.tq22437.chatgpt.site" />
-    <meta property="og:image" content="https://the-last-descent.tq22437.chatgpt.site/og.png" />
+    <meta property="og:image" content="https://the-last-descent.tq22437.chatgpt.site/sprites/og.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="The Last Descent" />
     <meta name="twitter:description" content="Steel. Spell. Descend. How deep can you go?" />
-    <meta name="twitter:image" content="https://the-last-descent.tq22437.chatgpt.site/og.png" />
+    <meta name="twitter:image" content="https://the-last-descent.tq22437.chatgpt.site/sprites/og.png" />
     <link rel="canonical" href="https://the-last-descent.tq22437.chatgpt.site" />
     <title>The Last Descent</title>
     <link rel="stylesheet" href="styles.css" />
@@ -28,11 +28,7 @@
     <main id="app">
       <section id="menuScreen" class="screen menu-screen" aria-labelledby="gameTitle">
         <div class="menu-art" aria-hidden="true">
-          <div class="moon"></div>
-          <div class="tower tower-left"></div>
-          <div class="tower tower-right"></div>
-          <div class="gate-glow"></div>
-          <div class="gate"></div>
+          <img class="menu-background" src="sprites/og.png" alt="" />
           <div id="menuParticles" class="menu-particles"></div>
         </div>
 
@@ -46,7 +42,7 @@
           <p class="menu-tagline">Steel. Spell. Descend.</p>
 
           <div class="menu-actions">
-            <button id="playButton" class="pixel-button primary-button" type="button">
+            <button id="playButton" class="pixel-button primary-button" type="button" disabled aria-describedby="assetStatus">
               <span class="button-rune" aria-hidden="true">◆</span>
               <span>Begin descent</span>
               <span class="button-key desktop-hint">Enter</span>
@@ -56,6 +52,8 @@
               <span>Settings</span>
             </button>
           </div>
+
+          <p id="assetStatus" class="asset-status" role="status">Loading sprites…</p>
 
           <div class="best-run" aria-label="Farthest run">
             <span>DEEPEST DESCENT</span>
@@ -105,7 +103,7 @@
             </div>
 
             <div id="chamberBuffCard" class="chamber-buff-card is-hidden">
-              <span>CHAMBER BLESSING</span>
+              <span>THIS CHAMBER ONLY</span>
               <strong id="chamberBuffText">None</strong>
             </div>
 
@@ -231,7 +229,7 @@
         <div class="modal buff-modal">
           <p class="modal-kicker">CHAMBER BLESSING</p>
           <h2 id="buffTitle">Choose your edge</h2>
-          <p>Pick one power for this run. Blessings stack as the dungeon deepens.</p>
+          <p>Pick one blessing for this chamber. It expires when you descend, including any unused temporary health.</p>
           <div id="buffChoices" class="buff-choices"></div>
         </div>
       </div>

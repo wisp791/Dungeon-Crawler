@@ -12,7 +12,7 @@
   ctx.imageSmoothingEnabled = false;
 
   const ui = {
-    menu: $("#menuScreen"), game: $("#gameScreen"), play: $("#playButton"),
+    menu: $("#menuScreen"), game: $("#gameScreen"), play: $("#playButton"), assetStatus: $("#assetStatus"),
     settings: $("#settingsModal"), settingsButton: $("#settingsButton"), settingsDone: $("#settingsDone"),
     pauseSettings: $("#pauseSettingsButton"), pause: $("#pauseModal"), pauseButton: $("#pauseButton"),
     resume: $("#resumeButton"), quit: $("#quitButton"), tutorial: $("#tutorialModal"),
@@ -40,9 +40,19 @@
     { id: "nova", name: "Nova", cost: 35, cooldown: 9, color: "#be84f0" }
   ];
   const SLASH_DURATION = 0.2;
+  const SLASH_REACH = 70 * 0.75;
   const SLASH_HALF_ANGLE = Math.acos(0.28);
   const CHARGE_DURATION = 0.9;
   const CHARGE_THRESHOLD = 0.18;
+  const SPRITE_FILES = {
+    player: "player", slime: "slime", skeleton: "skeleton", wisp: "wisp", spitter: "spitter",
+    charger: "charger", cultist: "cultist", sentinel: "sentinel", moss: "mossguardian",
+    bone: "bonewarden", cinder: "cindereye", hollow: "hollowknight", veil: "veilkeeper",
+    plague: "plaguematron", storm: "stormidol", wall: "wall", stairs: "stairs",
+    tutorial: "tutorialbg", dungeon: "dungeonbg"
+  };
+  const sprites = Object.fromEntries(Object.entries(SPRITE_FILES).map(([id, file]) => [id, { file: `sprites/${file}.png`, image: null, source: null }]));
+  const assets = { ready: false };
   const FLOOR_NAMES = ["THE HOLLOW HALLS", "THE SUNKEN VAULT", "THE CINDER CELLS", "THE VIOLET CRYPT", "THE IRON CHAPEL", "THE ECHOING DEEP"];
   const BOSS_CATALOG = [
     { id: "bone", name: "THE BONE WARDEN", special: "beam", color: "#e2d1aa" },
@@ -58,10 +68,10 @@
     { id: "frost_range", icon: "✦", name: "Shatterfield", description: "Frost impact radius grows by 30%." },
     { id: "physical", icon: "⚔", name: "Heavy Edge", description: "Slash and charged shot damage increases by 50%." },
     { id: "perfect_wave", icon: "◇", name: "Answering Guard", description: "Perfect blocks blast nearby foes for 50% of current health." },
-    { id: "health20", icon: "+", name: "Second Wind", description: "Heal 20 health immediately." },
-    { id: "max50", icon: "♥", name: "Giant's Heart", description: "Gain 50 max health and heal 50." },
+    { id: "health20", icon: "+", name: "Second Wind", description: "Gain 20 temporary health for this chamber." },
+    { id: "max50", icon: "♥", name: "Giant's Heart", description: "Gain 50 max health and 50 temporary health for this chamber." },
     { id: "quickcast", icon: "↻", name: "Quickened Runes", description: "Spell cooldowns recover 20% faster." },
-    { id: "long_blade", icon: "↔", name: "Long Blade", description: "Strike reach and width are doubled." },
+    { id: "long_blade", icon: "↔", name: "Long Blade", description: "Slash reach and charged shot size are doubled." },
     { id: "dash", icon: "»", name: "Windstep", description: "Dash recharges 25% faster." }
   ];
 
@@ -89,7 +99,7 @@
     controlMode: tutorials[storedControlMode] ? storedControlMode : detectedControlMode,
     screenShake: typeof storedScreenShake === "boolean" ? storedScreenShake : true, selectedSpell: 0, lastTime: performance.now(),
     accumulator: 0, unit: 1, shakeAmount: 0, shakeX: 0, shakeY: 0, toastTimer: 0, transitionTimer: 0,
-    bestFloor: Math.max(0, Number(loadPreference("bestFloor", 0)) || 0), runSeed: 0, buffs: {}, latestBuff: ""
+    bestFloor: Math.max(0, Number(loadPreference("bestFloor", 0)) || 0), runSeed: 0, buffs: {}, latestBuff: "", buffFloor: null, buffChoices: []
   };
 
   const input = { keys: new Set(), joystickX: 0, joystickY: 0, joystickPointer: null, mobileBlocking: false, mouseX: 0, mouseY: 0, mouseClientX: null, mouseClientY: null, hasMouseAim: false, pointerInside: false, attackPointer: null };
@@ -117,9 +127,65 @@
       stamina: 100, maxStamina: 100, facingX: 0, facingY: -1, attackCooldown: 0, attackAnim: 0,
       spellCooldowns: [0, 0, 0], invulnerable: 0, hurtFlash: 0, blocking: false, wasBlocking: false,
       blockStartedAt: 0, guardBroken: 0, walkCycle: 0, power: 1, lookDirection: 1,
-      dashCooldown: 0, dashTimer: 0, poisonTimer: 0, poisonTick: 0, slash: null, chargeTime: 0
+      dashCooldown: 0, dashTimer: 0, poisonTimer: 0, poisonTick: 0, slash: null, chargeTime: 0,
+      chamberHealth: 0, chamberMaxHp: 0
     };
   }
+
+  function opaqueBounds(data, width, height) {
+    let left = width, top = height, right = -1, bottom = -1;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        if (data[(y * width + x) * 4 + 3] <= 24) continue;
+        left = Math.min(left, x); top = Math.min(top, y);
+        right = Math.max(right, x); bottom = Math.max(bottom, y);
+      }
+    }
+    if (right < left) throw new Error("Empty sprite");
+    return { x: left, y: top, w: right - left + 1, h: bottom - top + 1 };
+  }
+
+  function loadSprites() {
+    return Promise.all(Object.values(sprites).map((sprite) => new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        try {
+          const buffer = document.createElement("canvas");
+          buffer.width = image.naturalWidth; buffer.height = image.naturalHeight;
+          const context = buffer.getContext("2d", { willReadFrequently: true });
+          context.drawImage(image, 0, 0);
+          sprite.source = opaqueBounds(context.getImageData(0, 0, buffer.width, buffer.height).data, buffer.width, buffer.height);
+          sprite.image = image;
+          resolve();
+        } catch (error) { reject(error); }
+      };
+      image.onerror = () => reject(new Error(`Could not load ${sprite.file}`));
+      image.src = sprite.file;
+    }))).then(() => { assets.ready = true; });
+  }
+
+  function spriteAspect(id) {
+    const source = sprites[id].source;
+    if (source) return source.w / source.h;
+    // Geometry is also available before loading, for layout and collision checks.
+    return id === "wall" ? 519 / 1653 : id === "stairs" ? 519 / 521 : 1;
+  }
+
+  function drawSprite(id, x, y, width, height) {
+    const { image, source } = sprites[id];
+    if (!image || !source) return;
+    ctx.drawImage(image, source.x, source.y, source.w, source.h, x, y, width, height);
+  }
+
+  function stairBounds(stairs = world.stairs, entrance = false) {
+    const w = 64 * state.unit;
+    const h = w / spriteAspect("stairs");
+    const bounds = { x: stairs.x - w / 2, y: stairs.y - h / 2, w, h };
+    // Only the open steps trigger descent; the surrounding masonry is decorative.
+    return entrance ? { x: bounds.x + w * 0.2, y: bounds.y + h * 0.24, w: w * 0.6, h: h * 0.62 } : bounds;
+  }
+
+  const stairClearance = () => Math.hypot(64, 64 / spriteAspect("stairs")) * state.unit / 2;
 
   function mulberry32(seed) {
     let value = seed >>> 0;
@@ -203,6 +269,9 @@
       const radius = actor === player ? player.radius * state.unit : actor.radius;
       if (collidesWithObstacle(actor.x, actor.y, radius)) Object.assign(actor, findClearPoint(actor.x, actor.y, radius));
     });
+    if (world.stairs && collidesWithObstacle(world.stairs.x, world.stairs.y, stairClearance())) {
+      Object.assign(world.stairs, findClearPoint(world.stairs.x, world.stairs.y, stairClearance()));
+    }
   }
 
   const floorName = (floor) => floor === 0 ? "THE SUNLIT VERGE" : FLOOR_NAMES[(floor - 1) % FLOOR_NAMES.length];
@@ -222,6 +291,7 @@
 
   function generateFloor(floor) {
     cancelCharge();
+    expireChamberBuff();
     const difficulty = floor;
     world.rng = mulberry32(seedForFloor(floor));
     world.theme = floor === 0 ? "grass" : floor % 4 === 0 ? "crypt" : floor % 3 === 0 ? "ember" : "stone";
@@ -245,10 +315,16 @@
 
   function createObstacles(floor) {
     const unit = state.unit;
+    const thickness = 32 * unit;
+    const length = thickness / spriteAspect("wall");
+    const wallSize = (vertical) => ({ w: vertical ? thickness : length, h: vertical ? length : thickness });
     if (floor === 0) {
       const margin = 26 * unit;
-      [[margin, world.height * 0.22, 52, 72, "tree"], [world.width - margin - 50 * unit, world.height * 0.29, 50, 70, "tree"], [world.width * 0.18, world.height * 0.66, 42, 30, "rock"], [world.width * 0.76, world.height * 0.66, 46, 32, "rock"], [world.width * 0.08, world.height * 0.48, 34, 28, "rock"], [world.width * 0.87, world.height * 0.5, 35, 28, "rock"]]
-        .forEach(([x, y, w, h, kind]) => world.obstacles.push({ x, y, w: w * unit, h: h * unit, kind }));
+      [[margin, world.height * 0.22, true], [world.width - margin - thickness, world.height * 0.29, true], [world.width * 0.18, world.height * 0.66, false], [world.width * 0.76, world.height * 0.66, false], [world.width * 0.08, world.height * 0.48, false], [world.width * 0.87, world.height * 0.5, false]]
+        .forEach(([x, y, vertical]) => {
+          const size = wallSize(vertical);
+          world.obstacles.push({ x: clamp(x, margin, world.width - margin - size.w), y: clamp(y, margin, world.height - margin - size.h), ...size, kind: "wall" });
+        });
       return;
     }
     const obstacleCount = Math.min(10, 5 + (floor % 5));
@@ -259,6 +335,7 @@
       { x: world.width * 0.5, y: world.height * 0.49, radius: 72 * unit }
     ];
     const add = (x, y, w, h, kind = "wall") => {
+      ({ w, h } = wallSize(h > w));
       const candidate = { x: Math.round(x / tile) * tile, y: Math.round(y / tile) * tile, w, h, kind };
       if (candidate.x < 30 * unit || candidate.y < 48 * unit || candidate.x + w > world.width - 30 * unit || candidate.y + h > world.height - 40 * unit) return false;
       if (reserved.some((zone) => circleIntersectsRect(zone.x, zone.y, zone.radius, candidate))) return false;
@@ -435,6 +512,7 @@
   }
 
   function startGame() {
+    if (!assets.ready) return;
     hideAllModals();
     ui.bossHud.classList.add("is-hidden");
     ui.menu.classList.add("is-hidden");
@@ -446,6 +524,8 @@
     state.runSeed = typeof crypto !== "undefined" && crypto.getRandomValues ? crypto.getRandomValues(new Uint32Array(1))[0] : (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
     state.buffs = {};
     state.latestBuff = "";
+    state.buffFloor = null;
+    state.buffChoices = [];
     state.runStartedAt = performance.now();
     player = createPlayer();
     ui.chamberBuffCard.classList.add("is-hidden");
@@ -587,6 +667,7 @@
     const pool = [...BUFF_CATALOG];
     const choices = [];
     while (choices.length < 3 && pool.length) choices.push(pool.splice(Math.floor(world.rng() * pool.length), 1)[0]);
+    state.buffChoices = choices.map((buff) => buff.id);
     ui.buffChoices.innerHTML = choices.map((buff) => `<button class="buff-choice" type="button" data-buff="${buff.id}"><span class="buff-choice-icon">${buff.icon}</span><span><strong>${buff.name}</strong><small>${buff.description}</small></span></button>`).join("");
     ui.buffModal.classList.remove("is-hidden");
     ui.buffChoices.querySelectorAll(".buff-choice").forEach((button) => button.addEventListener("click", () => applyBuff(button.dataset.buff)));
@@ -596,18 +677,36 @@
 
   function applyBuff(id) {
     const buff = BUFF_CATALOG.find((item) => item.id === id);
-    if (!buff) return;
-    state.buffs[id] = buffStacks(id) + 1;
-    if (id === "health20") player.hp = Math.min(player.maxHp, player.hp + 20);
-    if (id === "max50") { player.maxHp += 50; player.hp = Math.min(player.maxHp, player.hp + 50); }
+    if (!buff || state.scene !== "buff" || state.buffFloor === state.floor || !state.buffChoices.includes(id)) return;
+    state.buffs = { [id]: 1 };
+    state.buffFloor = state.floor;
+    state.buffChoices = [];
+    if (id === "max50") { player.chamberMaxHp = 50; player.maxHp += player.chamberMaxHp; }
+    if (id === "health20" || id === "max50") {
+      player.chamberHealth = Math.min(player.maxHp - player.hp, id === "health20" ? 20 : 50);
+      player.hp += player.chamberHealth;
+    }
     state.latestBuff = buff.name;
     ui.chamberBuffText.textContent = buff.name;
     ui.chamberBuffCard.classList.remove("is-hidden");
     ui.buffModal.classList.add("is-hidden");
     syncModalInert();
     state.scene = "playing";
-    showToast(`${buff.name.toUpperCase()} GAINED`);
+    showToast(`${buff.name.toUpperCase()} · THIS CHAMBER ONLY`);
     updateHud();
+  }
+
+  function expireChamberBuff() {
+    player.maxHp -= player.chamberMaxHp;
+    player.hp = Math.min(player.maxHp, Math.max(0, player.hp - player.chamberHealth));
+    player.chamberHealth = 0;
+    player.chamberMaxHp = 0;
+    state.buffs = {};
+    state.latestBuff = "";
+    state.buffFloor = null;
+    state.buffChoices = [];
+    ui.chamberBuffText.textContent = "None";
+    ui.chamberBuffCard.classList.add("is-hidden");
   }
 
   function clearInput() {
@@ -713,7 +812,7 @@
       const aim = aimVector();
       if (Math.abs(aim.x) > 0.12) player.lookDirection = Math.sign(aim.x);
     }
-    if (world.stairs && distance(player, world.stairs) < 30 * state.unit) descendFloor();
+    if (world.stairs && circleIntersectsRect(player.x, player.y, player.radius * state.unit, stairBounds(world.stairs, true))) descendFloor();
   }
 
   function updateEnemies(dt) {
@@ -989,7 +1088,7 @@
     player.facingY = aim.y;
     if (Math.abs(aim.x) > 0.12) player.lookDirection = Math.sign(aim.x);
     const size = Math.pow(2, buffStacks("long_blade"));
-    const reach = 70 * unit * size;
+    const reach = SLASH_REACH * unit * size;
     // Damage and animation share this snapshot, even if movement, dash, or aim changes.
     const slash = { x: player.x, y: player.y, angle: Math.atan2(aim.y, aim.x), reach, halfAngle: SLASH_HALF_ANGLE };
     player.slash = slash;
@@ -1026,7 +1125,7 @@
     player.attackCooldown = 0.5;
     spawnProjectile(player.x + aim.x * 18 * unit, player.y + aim.y * 18 * unit, aim.x, aim.y, {
       friendly: true, damage: Math.round(lerp(16, 48, strength) * player.power * Math.pow(1.5, buffStacks("physical"))),
-      speed, radius: lerp(5, 9, strength) * unit, color: strength === 1 ? "#ffe2a0" : "#d4def1",
+      speed, radius: lerp(5, 9, strength) * unit * Math.pow(2, buffStacks("long_blade")), color: strength === 1 ? "#ffe2a0" : "#d4def1",
       life: Math.hypot(world.width, world.height) / speed + 0.2, type: "charged", pierce: strength === 1 ? 1 : 0
     });
     burst(player.x + aim.x * 18 * unit, player.y + aim.y * 18 * unit, "#ffe2a0", 8, 90 * unit);
@@ -1133,7 +1232,7 @@
     if (enemy.isBoss) {
       world.projectiles = world.projectiles.filter((projectile) => projectile.friendly);
       world.floorCleared = true;
-      const stairPosition = findClearPoint(world.width * 0.5, Math.max(68 * state.unit, world.height * 0.14), 30 * state.unit);
+      const stairPosition = findClearPoint(world.width * 0.5, Math.max(68 * state.unit, world.height * 0.14), stairClearance());
       world.stairs = { x: stairPosition.x, y: stairPosition.y, phase: 0 };
       ui.bossHud.classList.add("is-hidden");
       player.hp = Math.min(player.maxHp, player.hp + 28);
@@ -1174,6 +1273,7 @@
       }
     }
     if (finalDamage > 0) {
+      player.chamberHealth = Math.max(0, player.chamberHealth - finalDamage);
       player.hp = Math.max(0, player.hp - finalDamage);
       player.hurtFlash = 0.18;
       showFloater(player.x, player.y - 31 * state.unit, `-${finalDamage}`, "#ff7777");
@@ -1187,6 +1287,7 @@
   function descendFloor() {
     if (state.scene !== "playing" || !world.floorCleared) return;
     clearInput();
+    expireChamberBuff();
     state.scene = "transition";
     const nextFloor = state.floor + 1;
     ui.transitionFloor.textContent = `FLOOR ${nextFloor}`;
@@ -1307,43 +1408,18 @@
   function drawBackground(time) {
     const { width: w, height: h } = world;
     const unit = state.unit;
-    const tile = Math.max(18, Math.round(32 * unit));
-    const palettes = { grass: ["#2c4829", "#294225", "#35532e"], stone: ["#222832", "#252c36", "#1e242d"], ember: ["#292426", "#30272a", "#231f23"], crypt: ["#262534", "#2b293b", "#211f2d"] };
-    const palette = palettes[world.theme];
-    ctx.fillStyle = palette[0];
+    const sprite = sprites[world.theme === "grass" ? "tutorial" : "dungeon"];
+    ctx.fillStyle = world.theme === "grass" ? "#2c4829" : "#222832";
     ctx.fillRect(-20, -20, w + 40, h + 40);
-    for (let y = 0, row = 0; y < h; y += tile, row += 1) {
-      for (let x = 0, column = 0; x < w; x += tile, column += 1) {
-        const value = (column * 17 + row * 31 + state.floor * 13) % 11;
-        ctx.fillStyle = value < 5 ? palette[0] : value < 9 ? palette[1] : palette[2];
-        ctx.fillRect(x, y, tile - 1, tile - 1);
-        if (world.theme === "grass" && value === 1) {
-          ctx.fillStyle = row % 3 ? "#6f9550" : "#d0b65b";
-          ctx.fillRect(x + tile * 0.27, y + tile * 0.58, Math.max(2, 2 * unit), Math.max(2, 7 * unit));
-          ctx.fillRect(x + tile * 0.18, y + tile * 0.7, Math.max(3, 6 * unit), Math.max(2, 2 * unit));
-        } else if (world.theme !== "grass" && value === 2) {
-          ctx.strokeStyle = world.theme === "ember" ? "#4a3030" : "#353d49";
-          ctx.lineWidth = Math.max(1, unit);
-          ctx.beginPath(); ctx.moveTo(x + tile * 0.22, y + tile * 0.2); ctx.lineTo(x + tile * 0.55, y + tile * 0.42); ctx.lineTo(x + tile * 0.39, y + tile * 0.69); ctx.stroke();
-        }
-      }
-    }
-    if (world.theme === "grass") {
-      const pathWidth = 102 * unit;
-      ctx.fillStyle = "#8d805e";
-      ctx.fillRect(w / 2 - pathWidth / 2, 0, pathWidth, h);
-      ctx.fillStyle = "#aa9a6e";
-      for (let y = -20; y < h; y += 42 * unit) {
-        const offset = Math.sin(y * 0.08) * 12 * unit;
-        ctx.fillRect(w / 2 - 34 * unit + offset, y, 31 * unit, 8 * unit);
-        ctx.fillRect(w / 2 + 8 * unit - offset, y + 17 * unit, 25 * unit, 8 * unit);
-      }
+    if (sprite.image) {
+      const image = sprite.image;
+      const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight);
+      const sourceW = w / scale, sourceH = h / scale;
+      ctx.drawImage(image, (image.naturalWidth - sourceW) / 2, (image.naturalHeight - sourceH) / 2, sourceW, sourceH, 0, 0, w, h);
     }
     const border = Math.max(12, 20 * unit);
-    ctx.fillStyle = world.theme === "grass" ? "#182d1c" : "#11151b";
+    ctx.fillStyle = "rgba(8,12,16,.58)";
     ctx.fillRect(0, 0, w, border); ctx.fillRect(0, h - border, w, border); ctx.fillRect(0, 0, border, h); ctx.fillRect(w - border, 0, border, h);
-    ctx.fillStyle = world.theme === "grass" ? "#3e5d35" : "#343c47";
-    ctx.fillRect(0, border, w, Math.max(2, 3 * unit)); ctx.fillRect(0, h - border - 3 * unit, w, Math.max(2, 3 * unit));
     world.torches.forEach((torch) => drawTorch(torch, time));
   }
 
@@ -1359,24 +1435,16 @@
   }
 
   function drawObstacles() {
-    const unit = state.unit;
     world.obstacles.forEach((obstacle) => {
-      if (obstacle.kind === "tree") {
-        ctx.fillStyle = "rgba(0,0,0,.25)"; ctx.fillRect(obstacle.x - 5 * unit, obstacle.y + obstacle.h - 6 * unit, obstacle.w + 12 * unit, 13 * unit);
-        ctx.fillStyle = "#554331"; ctx.fillRect(obstacle.x + obstacle.w * 0.39, obstacle.y + obstacle.h * 0.53, obstacle.w * 0.23, obstacle.h * 0.47);
-        ctx.fillStyle = "#1b3422"; ctx.fillRect(obstacle.x, obstacle.y + obstacle.h * 0.18, obstacle.w, obstacle.h * 0.55);
-        ctx.fillStyle = "#355a32"; ctx.fillRect(obstacle.x + 5 * unit, obstacle.y, obstacle.w - 10 * unit, obstacle.h * 0.52);
-      } else if (obstacle.kind === "rock") {
-        ctx.fillStyle = "rgba(0,0,0,.28)"; ctx.fillRect(obstacle.x - 4 * unit, obstacle.y + obstacle.h - 3 * unit, obstacle.w + 9 * unit, 8 * unit);
-        ctx.fillStyle = "#62665c"; ctx.fillRect(obstacle.x, obstacle.y + 7 * unit, obstacle.w, obstacle.h - 7 * unit);
-        ctx.fillStyle = "#85877a"; ctx.fillRect(obstacle.x + 6 * unit, obstacle.y, obstacle.w * 0.58, 10 * unit);
-      } else {
-        ctx.fillStyle = "rgba(0,0,0,.34)"; ctx.fillRect(obstacle.x + 6 * unit, obstacle.y + 8 * unit, obstacle.w, obstacle.h);
-        ctx.fillStyle = obstacle.kind === "pillar" ? "#343b47" : "#303742"; ctx.fillRect(obstacle.x, obstacle.y, obstacle.w, obstacle.h);
-        ctx.fillStyle = "#4a5260"; ctx.fillRect(obstacle.x, obstacle.y, obstacle.w, Math.max(4, 7 * unit));
-        ctx.fillStyle = "#1b2028"; ctx.fillRect(obstacle.x + obstacle.w - 6 * unit, obstacle.y + 7 * unit, 6 * unit, obstacle.h - 7 * unit);
-        if (obstacle.kind === "pillar") { ctx.fillStyle = "#59616d"; ctx.fillRect(obstacle.x - 4 * unit, obstacle.y, obstacle.w + 8 * unit, 8 * unit); ctx.fillRect(obstacle.x - 5 * unit, obstacle.y + obstacle.h - 8 * unit, obstacle.w + 10 * unit, 8 * unit); }
-      }
+      ctx.save();
+      ctx.translate(obstacle.x + obstacle.w / 2, obstacle.y + obstacle.h / 2);
+      const horizontal = obstacle.w > obstacle.h;
+      if (horizontal) ctx.rotate(Math.PI / 2);
+      // The cropped stone fills exactly the same rectangle used by collisions.
+      const w = horizontal ? obstacle.h : obstacle.w;
+      const h = horizontal ? obstacle.w : obstacle.h;
+      drawSprite("wall", -w / 2, -h / 2, w, h);
+      ctx.restore();
     });
   }
 
@@ -1388,9 +1456,9 @@
     const glow = ctx.createRadialGradient(x, y, 4, x, y, 64 * unit);
     glow.addColorStop(0, `rgba(243,196,103,${0.3 * pulse})`); glow.addColorStop(1, "rgba(243,196,103,0)");
     ctx.fillStyle = glow; ctx.fillRect(x - 70 * unit, y - 55 * unit, 140 * unit, 110 * unit);
-    ctx.fillStyle = "#171a20"; ctx.fillRect(x - 29 * unit, y - 18 * unit, 58 * unit, 38 * unit);
-    for (let index = 0; index < 4; index += 1) { ctx.fillStyle = index % 2 ? "#6e6046" : "#8e7953"; ctx.fillRect(x - (26 - index * 5) * unit, y - (13 - index * 8) * unit, (52 - index * 10) * unit, 7 * unit); }
-    ctx.fillStyle = "#f4ca71"; ctx.font = `bold ${Math.max(10, 12 * unit)}px monospace`; ctx.textAlign = "center"; ctx.fillText("DESCEND", x, y + 39 * unit);
+    const bounds = stairBounds();
+    drawSprite("stairs", bounds.x, bounds.y, bounds.w, bounds.h);
+    ctx.fillStyle = "#f4ca71"; ctx.font = `bold ${Math.max(10, 12 * unit)}px monospace`; ctx.textAlign = "center"; ctx.fillText("DESCEND", x, bounds.y + bounds.h + 17 * unit);
   }
 
   function drawPlayer(time) {
@@ -1415,7 +1483,7 @@
       ctx.closePath(); ctx.fill();
       ctx.globalAlpha = 0.95 * (1 - progress * 0.65);
       ctx.strokeStyle = "#ffe1a0";
-      ctx.lineWidth = 3 * unit;
+      ctx.lineWidth = 3 * unit * 0.75;
       ctx.lineCap = "round";
       ctx.beginPath();
       const start = -halfAngle + progress * (halfAngle * 2 - 1.3);
@@ -1427,14 +1495,13 @@
     ctx.globalAlpha = player.invulnerable > 0 && Math.floor(player.invulnerable * 18) % 2 ? 0.45 : 1;
     if (player.dashTimer > 0) { ctx.fillStyle = "rgba(205,165,255,.24)"; ctx.fillRect(-25 * unit, -30 * unit, 50 * unit, 58 * unit); }
     ctx.fillStyle = "rgba(0,0,0,.32)"; ctx.fillRect(-16 * unit, 15 * unit, 32 * unit, 8 * unit);
-    ctx.scale(player.lookDirection, 1);
-    if (player.blocking) { ctx.strokeStyle = performance.now() - player.blockStartedAt < 260 ? "#ffe2a0" : "#aebdca"; ctx.lineWidth = 4 * unit; ctx.beginPath(); ctx.arc(9 * unit, -3 * unit, 23 * unit, Math.PI * 1.55, Math.PI * 0.45); ctx.stroke(); }
-    ctx.fillStyle = player.hurtFlash > 0 ? "#fff4df" : "#2e3847"; ctx.fillRect(-11 * unit, -8 * unit, 22 * unit, 28 * unit);
-    ctx.fillStyle = "#bd4a48"; ctx.fillRect(-14 * unit, -11 * unit, 6 * unit, 28 * unit);
-    ctx.fillStyle = "#e0d1b4"; ctx.fillRect(-8 * unit, -23 * unit, 16 * unit, 15 * unit);
-    ctx.fillStyle = "#4b372d"; ctx.fillRect(-9 * unit, -25 * unit, 18 * unit, 6 * unit);
-    ctx.fillStyle = "#181d26"; ctx.fillRect(-7 * unit, 18 * unit, 6 * unit, 8 * unit); ctx.fillRect(3 * unit, 18 * unit, 6 * unit, 8 * unit);
-    ctx.fillStyle = "#e5b85c"; ctx.fillRect(10 * unit, -1 * unit, 18 * unit, 4 * unit); ctx.fillRect(25 * unit, -4 * unit, 4 * unit, 10 * unit);
+    if (player.blocking) {
+      const aim = aimVector();
+      ctx.save(); ctx.rotate(Math.atan2(aim.y, aim.x));
+      ctx.strokeStyle = performance.now() - player.blockStartedAt < 260 ? "#ffe2a0" : "#aebdca";
+      ctx.lineWidth = 4 * unit; ctx.beginPath(); ctx.arc(0, 0, 23 * unit, -1.1, 1.1); ctx.stroke(); ctx.restore();
+    }
+    drawActorSprite("player", 52 * unit, player.lookDirection > 0, player.hurtFlash > 0, 0.58);
     ctx.restore();
     if (player.blocking || player.stamina < player.maxStamina - 1) drawMiniBar(player.x, player.y + 31 * unit, 40 * unit, player.stamina / player.maxStamina, player.guardBroken > 0 ? "#b34848" : "#d2bd78");
   }
@@ -1446,11 +1513,9 @@
     if (enemy.telegraph > 0) drawAttackTelegraph(enemy, time);
     ctx.save(); ctx.translate(Math.round(enemy.x), Math.round(enemy.y + Math.sin(time * 0.004 + enemy.walk) * 2 * unit)); ctx.scale(deathScale, deathScale); ctx.globalAlpha = enemy.dead ? deathScale : 1;
     ctx.fillStyle = "rgba(0,0,0,.3)"; ctx.fillRect(-enemy.radius, enemy.radius * 0.68, enemy.radius * 2, 8 * unit);
-    if (enemy.isBoss) drawBossSprite(enemy);
-    else if (enemy.type === "slime") drawSlime(enemy);
-    else if (enemy.type === "skeleton") drawSkeleton(enemy);
-    else if (enemy.type === "wisp") drawWisp(enemy, time);
-    else drawSpecialEnemy(enemy, time);
+    const spriteId = enemy.isBoss ? enemy.variant : enemy.type;
+    const height = (enemy.isBoss ? 86 : { slime: 30, skeleton: 48, wisp: 46, spitter: 38, charger: 42, cultist: 50, sentinel: 54 }[enemy.type]) * unit;
+    drawActorSprite(spriteId, height, !enemy.isBoss && player.x > enemy.x, enemy.flash > 0);
     if (enemy.frozen > 0) { ctx.strokeStyle = "#9ce8f4"; ctx.lineWidth = 3 * unit; ctx.strokeRect(-enemy.radius - 4 * unit, -enemy.radius - 9 * unit, enemy.radius * 2 + 8 * unit, enemy.radius * 2 + 13 * unit); }
     if (enemy.burnTimer > 0) { ctx.fillStyle = Math.floor(time / 80) % 2 ? "#ffb34e" : "#f0623e"; ctx.fillRect(-6 * unit, -enemy.radius - 13 * unit, 6 * unit, 10 * unit); ctx.fillRect(3 * unit, -enemy.radius - 8 * unit, 5 * unit, 7 * unit); }
     ctx.restore();
@@ -1483,59 +1548,13 @@
     ctx.restore();
   }
 
-  function drawSlime(enemy) {
-    const unit = state.unit;
-    ctx.fillStyle = enemy.flash > 0 ? "#f6f2df" : world.theme === "grass" ? "#7aa658" : "#748e62"; ctx.fillRect(-15 * unit, -8 * unit, 30 * unit, 22 * unit); ctx.fillRect(-11 * unit, -15 * unit, 22 * unit, 9 * unit);
-    ctx.fillStyle = "#26312a"; ctx.fillRect(-8 * unit, -5 * unit, 4 * unit, 5 * unit); ctx.fillRect(5 * unit, -5 * unit, 4 * unit, 5 * unit);
-    ctx.fillStyle = "#9ec879"; ctx.fillRect(-9 * unit, -11 * unit, 8 * unit, 3 * unit);
-  }
-
-  function drawSkeleton(enemy) {
-    const unit = state.unit;
-    ctx.fillStyle = enemy.flash > 0 ? "#ffffff" : "#d5c9ad"; ctx.fillRect(-10 * unit, -21 * unit, 20 * unit, 18 * unit); ctx.fillRect(-7 * unit, -3 * unit, 14 * unit, 18 * unit); ctx.fillRect(-12 * unit, 13 * unit, 8 * unit, 8 * unit); ctx.fillRect(4 * unit, 13 * unit, 8 * unit, 8 * unit);
-    ctx.fillStyle = "#25252a"; ctx.fillRect(-6 * unit, -15 * unit, 4 * unit, 5 * unit); ctx.fillRect(3 * unit, -15 * unit, 4 * unit, 5 * unit);
-    ctx.fillStyle = "#7f4050"; ctx.fillRect(-8 * unit, 2 * unit, 16 * unit, 4 * unit);
-  }
-
-  function drawWisp(enemy, time) {
-    const unit = state.unit;
-    const pulse = 1 + Math.sin(time * 0.008 + enemy.walk) * 0.12;
-    ctx.scale(pulse, pulse); ctx.fillStyle = enemy.flash > 0 ? "#ffffff" : "rgba(102,204,228,.2)"; ctx.fillRect(-18 * unit, -18 * unit, 36 * unit, 36 * unit);
-    ctx.fillStyle = enemy.flash > 0 ? "#ffffff" : "#67cde3"; ctx.beginPath(); ctx.moveTo(0, -18 * unit); ctx.lineTo(13 * unit, 0); ctx.lineTo(0, 18 * unit); ctx.lineTo(-13 * unit, 0); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "#e9fbff"; ctx.fillRect(-3 * unit, -5 * unit, 6 * unit, 10 * unit);
-  }
-
-  function drawSpecialEnemy(enemy, time) {
-    const unit = state.unit;
-    const flash = enemy.flash > 0 ? "#ffffff" : null;
-    if (enemy.type === "spitter") {
-      ctx.fillStyle = flash || "#718f43"; ctx.fillRect(-15 * unit, -12 * unit, 30 * unit, 27 * unit);
-      ctx.fillStyle = "#b6d66f"; ctx.fillRect(-10 * unit, -17 * unit, 20 * unit, 8 * unit);
-      ctx.fillStyle = "#26351d"; ctx.fillRect(-7 * unit, -7 * unit, 4 * unit, 4 * unit); ctx.fillRect(4 * unit, -7 * unit, 4 * unit, 4 * unit);
-      ctx.fillStyle = "#d4ef82"; ctx.fillRect(-4 * unit, 4 * unit, 8 * unit, 6 * unit);
-    } else if (enemy.type === "charger") {
-      ctx.fillStyle = flash || "#874c43"; ctx.fillRect(-18 * unit, -15 * unit, 36 * unit, 33 * unit);
-      ctx.fillStyle = "#d89962"; ctx.fillRect(-22 * unit, -20 * unit, 10 * unit, 18 * unit); ctx.fillRect(12 * unit, -20 * unit, 10 * unit, 18 * unit);
-      ctx.fillStyle = "#321f20"; ctx.fillRect(-8 * unit, -8 * unit, 5 * unit, 5 * unit); ctx.fillRect(4 * unit, -8 * unit, 5 * unit, 5 * unit);
-    } else if (enemy.type === "cultist") {
-      ctx.fillStyle = flash || "#655078"; ctx.beginPath(); ctx.moveTo(0, -23 * unit); ctx.lineTo(18 * unit, 19 * unit); ctx.lineTo(-18 * unit, 19 * unit); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = "#b887cc"; ctx.fillRect(-11 * unit, -15 * unit, 22 * unit, 6 * unit);
-      ctx.fillStyle = "#f0bc68"; ctx.fillRect(-4 * unit, -8 * unit, 8 * unit, 5 * unit);
-    } else {
-      const pulse = 0.8 + Math.sin(time * 0.007 + enemy.walk) * 0.2;
-      ctx.fillStyle = flash || "#4f6676"; ctx.fillRect(-18 * unit, -20 * unit, 36 * unit, 40 * unit);
-      ctx.fillStyle = `rgba(104,201,237,${pulse})`; ctx.fillRect(-13 * unit, -14 * unit, 26 * unit, 7 * unit); ctx.fillRect(-4 * unit, -4 * unit, 8 * unit, 14 * unit);
-      ctx.fillStyle = "#253039"; ctx.fillRect(-22 * unit, 10 * unit, 44 * unit, 8 * unit);
-    }
-  }
-
-  function drawBossSprite(enemy) {
-    const unit = state.unit;
-    const colors = { moss: ["#597b45", "#9db969", "#342f29"], bone: ["#c7b99c", "#e1d6bb", "#49384a"], cinder: ["#773f3b", "#df714c", "#2e292c"], hollow: ["#485368", "#8797ad", "#232936"], veil: ["#674d78", "#ad79bf", "#282433"], plague: ["#55743e", "#a6cf62", "#27331f"], storm: ["#405e72", "#73d0ef", "#202d37"] }[enemy.variant];
-    ctx.fillStyle = enemy.flash > 0 ? "#ffffff" : colors[0]; ctx.fillRect(-25 * unit, -18 * unit, 50 * unit, 47 * unit); ctx.fillRect(-18 * unit, -36 * unit, 36 * unit, 21 * unit);
-    ctx.fillStyle = enemy.flash > 0 ? "#ffffff" : colors[1]; ctx.fillRect(-21 * unit, -31 * unit, 42 * unit, 7 * unit); ctx.fillRect(-30 * unit, -9 * unit, 9 * unit, 27 * unit); ctx.fillRect(21 * unit, -9 * unit, 9 * unit, 27 * unit);
-    ctx.fillStyle = colors[2]; ctx.fillRect(-11 * unit, -19 * unit, 7 * unit, 6 * unit); ctx.fillRect(5 * unit, -19 * unit, 7 * unit, 6 * unit);
-    ctx.fillStyle = "#f06b5f"; ctx.fillRect(-8 * unit, -18 * unit, 3 * unit, 3 * unit); ctx.fillRect(7 * unit, -18 * unit, 3 * unit, 3 * unit);
+  function drawActorSprite(id, height, flipped = false, flash = false, anchorX = 0.5) {
+    const width = height * spriteAspect(id);
+    ctx.save();
+    if (flipped) ctx.scale(-1, 1);
+    if (flash) ctx.filter = "brightness(2)";
+    drawSprite(id, -width * anchorX, -height * 0.65, width, height);
+    ctx.restore();
   }
 
   function drawMiniBar(x, y, width, ratio, color) {
@@ -1781,6 +1800,14 @@
   }
 
   function initialize() {
+    ui.play.disabled = true;
+    loadSprites().then(() => {
+      ui.play.disabled = false;
+      ui.assetStatus.classList.add("is-hidden");
+    }).catch((error) => {
+      ui.assetStatus.textContent = "Sprites could not load. Refresh to try again.";
+      console.error(error);
+    });
     buildMenuParticles();
     bindEvents();
     applyControlMode();
