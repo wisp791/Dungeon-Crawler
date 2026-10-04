@@ -1600,10 +1600,6 @@
       const sourceW = w / scale, sourceH = h / scale;
       ctx.drawImage(image, (image.naturalWidth - sourceW) / 2, (image.naturalHeight - sourceH) / 2, sourceW, sourceH, 0, 0, w, h);
     }
-    if (world.theme !== "grass") {
-      ctx.fillStyle = "rgba(3,7,14,.48)";
-      ctx.fillRect(0, 0, w, h);
-    }
     const border = Math.max(12, 20 * unit);
     ctx.fillStyle = "rgba(8,12,16,.58)";
     ctx.fillRect(0, 0, w, border); ctx.fillRect(0, h - border, w, border); ctx.fillRect(0, 0, border, h); ctx.fillRect(w - border, 0, border, h);
@@ -1630,8 +1626,8 @@
       // The cropped stone fills exactly the same rectangle used by collisions.
       const w = horizontal ? obstacle.h : obstacle.w;
       const h = horizontal ? obstacle.w : obstacle.h;
-      ctx.filter = "brightness(1.35)";
-      ctx.shadowColor = "rgba(0,0,0,.65)"; ctx.shadowBlur = 6 * state.unit;
+      ctx.shadowColor = "rgba(0,0,0,.4)"; ctx.shadowBlur = 4 * state.unit;
+      ctx.shadowOffsetX = 2 * state.unit; ctx.shadowOffsetY = 3 * state.unit;
       drawSprite("wall", -w / 2, -h / 2, w, h);
       ctx.restore();
     });
