@@ -1626,8 +1626,8 @@
       // The cropped stone fills exactly the same rectangle used by collisions.
       const w = horizontal ? obstacle.h : obstacle.w;
       const h = horizontal ? obstacle.w : obstacle.h;
-      ctx.shadowColor = "rgba(0,0,0,.4)"; ctx.shadowBlur = 4 * state.unit;
-      ctx.shadowOffsetX = 2 * state.unit; ctx.shadowOffsetY = 3 * state.unit;
+      ctx.shadowColor = "rgba(0,0,0,.8)"; ctx.shadowBlur = 7 * state.unit;
+      ctx.shadowOffsetX = 4 * state.unit; ctx.shadowOffsetY = 6 * state.unit;
       drawSprite("wall", -w / 2, -h / 2, w, h);
       ctx.restore();
     });
