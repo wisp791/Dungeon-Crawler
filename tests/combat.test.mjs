@@ -69,7 +69,7 @@ function game() {
     collidesWithObstacle, circleIntersectsRect, findClearPoint, applyBuff, expireChamberBuff,
     showBuffChoices, BUFF_CATALOG, damagePlayer, descendFloor, scaleWorld, updateEnemies,
     updateBoss, beginEnemyAttack, resolveEnemyAttack, updateEnemyCharge, updatePickups,
-    killEnemy, drawHazards, spawnProjectile
+    killEnemy, drawHazards, spawnProjectile, moveEntity
   };`);
   vm.runInNewContext(instrumented, sandbox);
   const api = sandbox.game;
@@ -101,6 +101,144 @@ function game() {
 }
 
 function close(actual, expected) { assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`); }
+
+test("player sprites face travel while slash, spell and pointer aim remain independent", () => {
+  for (const direction of [-1, 1]) {
+    const api = game();
+    api.input.keys.add(direction < 0 ? "KeyA" : "KeyD");
+    api.pointer("pointerenter", 480 - direction * 200, 270);
+    api.updatePlayer(1 / 60);
+    assert.equal(api.player.lookDirection, direction);
+    api.window.dispatch("pointermove", { pointerType: "mouse", clientX: 500 - direction * 200, clientY: 300 });
+    api.requestAttack();
+    close(Math.cos(api.player.slash.angle), -direction);
+    api.castSpell(0);
+    assert.equal(Math.sign(api.world.projectiles[0].vx), -direction);
+    api.render(0);
+    assert.equal(api.player.lookDirection, direction);
+    api.drawing.length = 0;
+    api.drawPlayer(0);
+    assert.equal(api.drawing.some(call => call.method === "scale" && call.args[0] === -1), direction < 0);
+  }
+});
+
+test("every enemy and boss mirrors its native artwork to face left and right travel", () => {
+  const nativeLeft = new Set(["skeleton", "cultist", "hollow"]);
+  for (const id of ["slime", "skeleton", "wisp", "spitter", "charger", "cultist", "sentinel", "moss", "bone", "cinder", "hollow", "veil", "plague", "storm"]) {
+    for (const direction of [-1, 1]) {
+      const api = game();
+      const bossIndex = api.BOSS_CATALOG.findIndex(profile => profile.id === id);
+      const isBoss = id === "moss" || bossIndex >= 0;
+      if (isBoss) {
+        api.state.floor = id === "moss" ? 0 : 1;
+        api.world.rng = () => (bossIndex + 0.5) / api.BOSS_CATALOG.length;
+        api.createBoss();
+      } else api.world.enemies = [api.createEnemy(id, 480, 270, 0)];
+      const actor = isBoss ? api.world.boss : api.world.enemies[0];
+      Object.assign(actor, { x: 480, y: 270, attackCooldown: 100, pursuitCooldown: 100, specialCooldown: 100 });
+      api.player.x = 480 + direction * 300;
+      api.updateEnemies(1 / 60);
+      assert.equal(Math.sign(actor.x - 480), direction, `${id} travel`);
+      assert.equal(actor.lookDirection, direction, `${id} facing`);
+      api.drawEnemy(actor, 0);
+      const flipped = api.drawing.some(call => call.method === "scale" && call.args[0] === -1);
+      assert.equal(flipped, (direction < 0) !== nativeLeft.has(id), `${id} artwork`);
+    }
+  }
+});
+
+test("ranged enemies face their retreat even while their attack aims at the player", () => {
+  for (const type of ["wisp", "spitter", "sentinel"]) for (const direction of [-1, 1]) {
+    const api = game();
+    const enemy = api.createEnemy(type, 480, 270, 0);
+    enemy.attackCooldown = 0;
+    api.world.enemies = [enemy];
+    api.player.x = enemy.x + direction * 80;
+    api.updateEnemies(1 / 60);
+    assert.equal(Math.sign(enemy.x - 480), -direction);
+    assert.equal(enemy.lookDirection, -direction);
+    assert.equal(Math.sign(Math.cos(enemy.attackAngle)), direction);
+    assert.ok(enemy.telegraph > 0);
+  }
+});
+
+test("vertical movement, blocked travel and idle cursor movement preserve sprite facing", () => {
+  const api = game();
+  api.player.lookDirection = -1;
+  api.input.keys.add("KeyW");
+  api.updatePlayer(1 / 60);
+  assert.equal(api.player.lookDirection, -1);
+  api.input.keys.clear();
+  api.world.obstacles = [{ x: 494, y: 100, w: 32, h: 300 }];
+  api.input.keys.add("KeyD");
+  api.updatePlayer(1 / 60);
+  assert.equal(api.player.x, 480);
+  assert.equal(api.player.lookDirection, -1);
+  api.input.keys.clear();
+  api.pointer("pointerenter", 700, 270);
+  api.updatePlayer(1 / 60);
+  assert.equal(api.player.lookDirection, -1);
+});
+
+test("charge afterimages preserve the direction at which they were emitted", () => {
+  const api = game();
+  const charger = api.createEnemy("charger", 480, 270, 0);
+  api.player.x = 200;
+  api.beginEnemyAttack(charger, "charge", 0.1);
+  api.resolveEnemyAttack(charger);
+  api.updateEnemyCharge(charger, 1 / 60);
+  assert.equal(charger.lookDirection, -1);
+  assert.equal(charger.chargeTrail[0].lookDirection, -1);
+  api.moveEntity(charger, 3, 0, charger.radius);
+  assert.equal(charger.lookDirection, 1);
+  api.drawEnemy(charger, 0);
+  assert.equal(api.drawing.filter(call => call.method === "scale" && call.args[0] === -1).length, 1);
+});
+
+test("actor shadows are ground-anchored circles at desktop and mobile scales", () => {
+  for (const unit of [0.7, 1, 1.65]) {
+    const api = game();
+    api.state.unit = unit;
+    api.createBoss();
+    const actors = [api.player, api.createEnemy("slime", 200, 200, 0), api.createEnemy("sentinel", 300, 200, 0), api.world.boss];
+    for (const actor of actors) {
+      const draw = () => actor === api.player ? api.drawPlayer(0) : api.drawEnemy(actor, 0);
+      api.drawing.length = 0;
+      draw();
+      const circle = api.drawing.find(call => call.method === "arc").args;
+      assert.equal(circle[0], actor.x);
+      assert.ok(circle[1] > actor.y);
+      assert.ok(circle[2] > 0);
+      assert.equal(circle[3], 0);
+      close(circle[4], Math.PI * 2);
+      assert.equal(api.drawing.some(call => call.method === "fillRect"), false);
+      api.drawing.length = 0;
+      actor.walk = 1;
+      api.player.walkCycle = 1;
+      api.input.keys.add("KeyW");
+      draw();
+      assert.deepEqual(api.drawing.find(call => call.method === "arc").args, circle);
+    }
+  }
+});
+
+test("the initial tutorial remains wall-free while subsequent floors generate walls", () => {
+  for (const [width, height, unit] of [[960, 540, 1], [390, 844, 0.7]]) {
+    const api = game();
+    Object.assign(api.world, { width, height });
+    api.state.unit = unit;
+    for (const seed of [1, 57, 812, 9341]) {
+      api.state.runSeed = seed;
+      api.generateFloor(1);
+      assert.ok(api.world.obstacles.length > 0);
+      api.generateFloor(0);
+      assert.equal(api.world.obstacles.length, 0);
+      assert.equal(api.world.enemies.length, 5);
+      api.drawObstacles();
+      assert.equal(api.drawing.some(call => call.method === "drawImage"), false);
+    }
+  }
+});
 
 test("slashes hit and render toward cursor in all eight directions, independent of facing", () => {
   for (let direction = 0; direction < 8; direction++) {

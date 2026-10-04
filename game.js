@@ -51,6 +51,12 @@
     plague: "plaguematron", storm: "stormidol", wall: "wall", stairs: "stairs",
     tutorial: "tutorialbg", dungeon: "dungeonbg"
   };
+  // Direction the supplied artwork faces before mirroring: left -1, right 1.
+  const SPRITE_FACING = {
+    player: 1, slime: 1, skeleton: -1, wisp: 1, spitter: 1, charger: 1,
+    cultist: -1, sentinel: 1, moss: 1, bone: 1, cinder: 1, hollow: -1,
+    veil: 1, plague: 1, storm: 1
+  };
   const sprites = Object.fromEntries(Object.entries(SPRITE_FILES).map(([id, file]) => [id, { file: `sprites/${file}.png`, image: null, source: null }]));
   const assets = { ready: false };
   const BOSS_CATALOG = [
@@ -227,7 +233,7 @@
     world.height = nextHeight;
     state.unit = clamp(Math.min(nextWidth / 960, nextHeight / 540), 0.7, 1.65);
     if (state.scene !== "menu" && oldWidth && oldHeight) scaleWorld(nextWidth / oldWidth, nextHeight / oldHeight, state.unit / oldUnit);
-    if (input.mouseClientX !== null) updateFacingFromPointer({ clientX: input.mouseClientX, clientY: input.mouseClientY });
+    if (input.mouseClientX !== null) updateAimFromPointer({ clientX: input.mouseClientX, clientY: input.mouseClientY });
   }
 
   function scaleWorld(scaleX, scaleY, sizeScale) {
@@ -319,19 +325,11 @@
   }
 
   function createObstacles(floor) {
+    if (floor === 0) return;
     const unit = state.unit;
     const thickness = 32 * unit;
     const length = thickness / spriteAspect("wall");
     const wallSize = (vertical) => ({ w: vertical ? thickness : length, h: vertical ? length : thickness });
-    if (floor === 0) {
-      const margin = 26 * unit;
-      [[margin, world.height * 0.22, true], [world.width - margin - thickness, world.height * 0.29, true], [world.width * 0.18, world.height * 0.66, false], [world.width * 0.76, world.height * 0.66, false], [world.width * 0.08, world.height * 0.48, false], [world.width * 0.87, world.height * 0.5, false]]
-        .forEach(([x, y, vertical]) => {
-          const size = wallSize(vertical);
-          world.obstacles.push({ x: clamp(x, margin, world.width - margin - size.w), y: clamp(y, margin, world.height - margin - size.h), ...size, kind: "wall" });
-        });
-      return;
-    }
     const obstacleCount = Math.min(10, 5 + (floor % 5));
     const tile = 32 * unit;
     const reserved = [
@@ -475,7 +473,7 @@
       telegraph: 0, telegraphMax: 0, telegraphRadius: 0, telegraphWidth: 0, telegraphLength: 0,
       attackKind: "", attackAngle: 0, flash: 0, frozen: 0, stunned: 0, burnTimer: 0, burnTick: 0, burnDamage: 0,
       dead: false, deathTimer: 0, hurtVisible: 0, walk: world.rng() * 10, knockX: 0, knockY: 0, isBoss: false,
-      charge: null, chargeTrail: []
+      charge: null, chargeTrail: [], lookDirection: player.x < x ? -1 : 1
     };
   }
 
@@ -495,7 +493,8 @@
       telegraphRadius: 0, telegraphWidth: 0, telegraphLength: 0, attackKind: "", attackAngle: 0,
       flash: 0, frozen: 0, stunned: 0, burnTimer: 0, burnTick: 0, burnDamage: 0, dead: false, deathTimer: 0,
       hurtVisible: 0, walk: 0, knockX: 0, knockY: 0, isBoss: true,
-      variant: profile.id, special: profile.special, specialColor: profile.color
+      variant: profile.id, special: profile.special, specialColor: profile.color,
+      lookDirection: player.x < spawn.x ? -1 : 1
     };
     world.boss = boss;
     world.bossSpawned = true;
@@ -809,14 +808,9 @@
     if (movement.x || movement.y) {
       player.facingX = movement.x;
       player.facingY = movement.y;
-      if (Math.abs(movement.x) > 0.12) player.lookDirection = Math.sign(movement.x);
       const speed = player.speed * state.unit * (player.blocking ? 0.5 : 1);
       moveEntity(player, movement.x * speed * dt, movement.y * speed * dt, player.radius * state.unit);
       player.walkCycle += dt * 11;
-    }
-    if (state.controlMode === "desktop" && input.hasMouseAim) {
-      const aim = aimVector();
-      if (Math.abs(aim.x) > 0.12) player.lookDirection = Math.sign(aim.x);
     }
     if (world.stairs && circleIntersectsRect(player.x, player.y, player.radius * state.unit, stairBounds(world.stairs, true))) descendFloor();
   }
@@ -925,7 +919,7 @@
     charge.trailTimer -= dt;
     if (charge.trailTimer <= 0) {
       charge.trailTimer = 0.025;
-      enemy.chargeTrail.push({ x: enemy.x, y: enemy.y, life: 0.18 });
+      enemy.chargeTrail.push({ x: enemy.x, y: enemy.y, life: 0.18, lookDirection: enemy.lookDirection });
       addParticle(enemy.x - charge.dx * enemy.radius, enemy.y - charge.dy * enemy.radius, -charge.dx * 55 * state.unit, -charge.dy * 55 * state.unit, "#c7a27e", 0.25, 3 * state.unit);
     }
     if (blocked || charge.remaining <= 0.01) {
@@ -1116,11 +1110,15 @@
   }
 
   function moveEntity(entity, dx, dy, radius) {
+    const previousX = entity.x;
     const margin = 20 * state.unit;
     const nextX = clamp(entity.x + dx, margin + radius, world.width - margin - radius);
     if (!collidesWithObstacle(nextX, entity.y, radius)) entity.x = nextX;
     const nextY = clamp(entity.y + dy, margin + radius, world.height - margin - radius);
     if (!collidesWithObstacle(entity.x, nextY, radius)) entity.y = nextY;
+    // Face actual travel, including retreat, knockback and charge. Preserve the
+    // last direction during vertical movement or when a wall blocks horizontal travel.
+    if (Math.abs(entity.x - previousX) > 0.01 * state.unit) entity.lookDirection = Math.sign(entity.x - previousX);
   }
 
   function collidesWithObstacle(x, y, radius) {
@@ -1150,7 +1148,6 @@
     const aim = aimVector();
     player.facingX = aim.x;
     player.facingY = aim.y;
-    if (Math.abs(aim.x) > 0.12) player.lookDirection = Math.sign(aim.x);
     const size = Math.pow(2, buffStacks("long_blade"));
     const reach = SLASH_REACH * unit * size;
     // Damage and animation share this snapshot, even if movement, dash, or aim changes.
@@ -1209,7 +1206,6 @@
     const aim = aimVector();
     player.facingX = aim.x;
     player.facingY = aim.y;
-    if (Math.abs(aim.x) > 0.12) player.lookDirection = Math.sign(aim.x);
     if (spell.id === "ember") {
       spawnProjectile(player.x + aim.x * 18 * unit, player.y + aim.y * 18 * unit, aim.x, aim.y, { friendly: true, damage: Math.round(34 * player.power), speed: 345 * unit, radius: 7 * unit, color: spell.color, life: 2.2, type: "ember", pierce: 0 });
       burst(player.x, player.y, spell.color, 8, 75 * unit);
@@ -1271,7 +1267,6 @@
     }
     player.facingX = dx;
     player.facingY = dy;
-    if (Math.abs(dx) > 0.12) player.lookDirection = Math.sign(dx);
     player.invulnerable = Math.max(player.invulnerable, 0.24);
     player.dashTimer = 0.2;
     player.dashCooldown = 1.15 * Math.pow(0.75, buffStacks("dash"));
@@ -1415,7 +1410,7 @@
   }
 
   function render(time) {
-    if (input.mouseClientX !== null) updateFacingFromPointer({ clientX: input.mouseClientX, clientY: input.mouseClientY });
+    if (input.mouseClientX !== null) updateAimFromPointer({ clientX: input.mouseClientX, clientY: input.mouseClientY });
     const mouseControl = state.scene === "playing" && state.controlMode === "desktop";
     canvas.classList.toggle("is-playing", mouseControl);
     canvas.classList.toggle("is-aiming", mouseControl && input.hasMouseAim && input.pointerInside);
@@ -1561,17 +1556,17 @@
       ctx.stroke();
       ctx.restore();
     }
+    drawActorShadow(player.x, player.y, player.radius * unit, 52 * unit);
     ctx.save(); ctx.translate(Math.round(player.x), Math.round(player.y + bob));
     ctx.globalAlpha = player.invulnerable > 0 && Math.floor(player.invulnerable * 18) % 2 ? 0.45 : 1;
     if (player.dashTimer > 0) { ctx.fillStyle = "rgba(205,165,255,.24)"; ctx.fillRect(-25 * unit, -30 * unit, 50 * unit, 58 * unit); }
-    ctx.fillStyle = "rgba(0,0,0,.32)"; ctx.fillRect(-16 * unit, 15 * unit, 32 * unit, 8 * unit);
     if (player.blocking) {
       const aim = aimVector();
       ctx.save(); ctx.rotate(Math.atan2(aim.y, aim.x));
       ctx.strokeStyle = performance.now() - player.blockStartedAt < 260 ? "#ffe2a0" : "#aebdca";
       ctx.lineWidth = 4 * unit; ctx.beginPath(); ctx.arc(0, 0, 23 * unit, -1.1, 1.1); ctx.stroke(); ctx.restore();
     }
-    drawActorSprite("player", 52 * unit, player.lookDirection > 0, player.hurtFlash > 0, 0.58);
+    drawActorSprite("player", 52 * unit, player.lookDirection, player.hurtFlash > 0, 0.58);
     ctx.restore();
     if (player.blocking || player.stamina < player.maxStamina - 1) drawMiniBar(player.x, player.y + 31 * unit, 40 * unit, player.stamina / player.maxStamina, player.guardBroken > 0 ? "#b34848" : "#d2bd78");
   }
@@ -1581,19 +1576,16 @@
     const unit = state.unit;
     const spriteId = enemy.isBoss ? enemy.variant : enemy.type;
     const height = (enemy.isBoss ? 86 : { slime: 30, skeleton: 48, wisp: 46, spitter: 38, charger: 42, cultist: 50, sentinel: 54 }[enemy.type]) * unit;
-    const nativeRight = enemy.type === "charger" || enemy.type === "spitter";
-    const lookingRight = enemy.charge ? enemy.charge.dx >= 0 : player.x > enemy.x;
-    const flipped = enemy.isBoss && !enemy.charge ? false : lookingRight !== nativeRight;
     const deathScale = enemy.dead ? clamp(enemy.deathTimer / (enemy.isBoss ? 0.9 : 0.32), 0, 1) : 1;
     if (enemy.telegraph > 0) drawAttackTelegraph(enemy, time);
     enemy.chargeTrail.forEach((point) => {
       ctx.save(); ctx.translate(point.x, point.y);
       ctx.globalAlpha = point.life / 0.18 * 0.3;
-      drawActorSprite(spriteId, height, flipped);
+      drawActorSprite(spriteId, height, point.lookDirection);
       ctx.restore();
     });
+    drawActorShadow(enemy.x, enemy.y, enemy.radius, height, deathScale);
     ctx.save(); ctx.translate(Math.round(enemy.x), Math.round(enemy.y + Math.sin(time * 0.004 + enemy.walk) * 2 * unit)); ctx.scale(deathScale, deathScale); ctx.globalAlpha = enemy.dead ? deathScale : 1;
-    ctx.fillStyle = "rgba(0,0,0,.3)"; ctx.fillRect(-enemy.radius, enemy.radius * 0.68, enemy.radius * 2, 8 * unit);
     if (enemy.charge) {
       ctx.save(); ctx.rotate(enemy.attackAngle);
       ctx.strokeStyle = enemy.specialColor || "#e4b38b"; ctx.lineWidth = 2 * unit;
@@ -1603,7 +1595,7 @@
       }
       ctx.restore();
     }
-    drawActorSprite(spriteId, height, flipped, enemy.flash > 0);
+    drawActorSprite(spriteId, height, enemy.lookDirection, enemy.flash > 0);
     if (enemy.frozen > 0) { ctx.strokeStyle = "#9ce8f4"; ctx.lineWidth = 3 * unit; ctx.strokeRect(-enemy.radius - 4 * unit, -enemy.radius - 9 * unit, enemy.radius * 2 + 8 * unit, enemy.radius * 2 + 13 * unit); }
     if (enemy.burnTimer > 0) { ctx.fillStyle = Math.floor(time / 80) % 2 ? "#ffb34e" : "#f0623e"; ctx.fillRect(-6 * unit, -enemy.radius - 13 * unit, 6 * unit, 10 * unit); ctx.fillRect(3 * unit, -enemy.radius - 8 * unit, 5 * unit, 7 * unit); }
     ctx.restore();
@@ -1644,10 +1636,20 @@
     ctx.restore();
   }
 
-  function drawActorSprite(id, height, flipped = false, flash = false, anchorX = 0.5) {
+  function drawActorShadow(x, y, radius, height, opacity = 1) {
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.fillStyle = "rgba(0,0,0,.3)";
+    ctx.beginPath();
+    ctx.arc(x, y + height * 0.35 - radius * 0.2, radius * 0.65, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawActorSprite(id, height, direction = 1, flash = false, anchorX = 0.5) {
     const width = height * spriteAspect(id);
     ctx.save();
-    if (flipped) ctx.scale(-1, 1);
+    if (direction !== SPRITE_FACING[id]) ctx.scale(-1, 1);
     if (flash) ctx.filter = "brightness(2)";
     drawSprite(id, -width * anchorX, -height * 0.65, width, height);
     ctx.restore();
@@ -1774,7 +1776,7 @@
     return { x: ((event.clientX - rect.left) / rect.width) * canvas.width, y: ((event.clientY - rect.top) / rect.height) * canvas.height };
   }
 
-  function updateFacingFromPointer(event) {
+  function updateAimFromPointer(event) {
     input.mouseClientX = event.clientX;
     input.mouseClientY = event.clientY;
     const pointer = pointerPosition(event);
@@ -1783,8 +1785,6 @@
     input.mouseY = pointer.y;
     input.hasMouseAim = true;
     input.pointerInside = pointer.x >= 0 && pointer.x <= canvas.width && pointer.y >= 0 && pointer.y <= canvas.height;
-    const aim = aimVector();
-    if (Math.abs(aim.x) > 0.12) player.lookDirection = Math.sign(aim.x);
   }
 
   function updateJoystick(event) {
@@ -1871,19 +1871,19 @@
     document.addEventListener("visibilitychange", () => { if (document.hidden) { clearInput(); if (state.scene === "playing") openPause(); } });
     window.addEventListener("resize", resizeCanvas);
 
-    canvas.addEventListener("pointerenter", (event) => { if (event.pointerType === "mouse" && state.scene === "playing") updateFacingFromPointer(event); });
+    canvas.addEventListener("pointerenter", (event) => { if (event.pointerType === "mouse" && state.scene === "playing") updateAimFromPointer(event); });
     canvas.addEventListener("pointerleave", () => { input.pointerInside = false; });
-    window.addEventListener("pointermove", (event) => { if (event.pointerType === "mouse") updateFacingFromPointer(event); });
+    window.addEventListener("pointermove", (event) => { if (event.pointerType === "mouse") updateAimFromPointer(event); });
     canvas.addEventListener("pointerdown", (event) => {
       if (event.pointerType !== "mouse" || state.scene !== "playing" || state.controlMode !== "desktop") return;
       event.preventDefault();
-      updateFacingFromPointer(event);
+      updateAimFromPointer(event);
       if (event.button === 0) startCharge(event.pointerId);
       if (event.button === 2) castSpell(state.selectedSpell);
     });
     canvas.addEventListener("pointerup", (event) => {
       if (event.pointerType !== "mouse" || event.button !== 0 || event.pointerId !== input.attackPointer) return;
-      updateFacingFromPointer(event);
+      updateAimFromPointer(event);
       releaseCharge();
     });
     const cancelPointerCharge = (event) => { if (event.pointerId === input.attackPointer) cancelCharge(); };
